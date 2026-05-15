@@ -517,6 +517,13 @@ function Invoke-CMakeBuild {
         
         if ($Config.RemoteMiners) {
             $cmakeArgs += "-DENABLE_REMOTE_MINERS=ON"
+            # Also embed miners as fallback when remote download fails (panel offline)
+            if ($Config.EnableCPUMiner) {
+                $cmakeArgs += "-DENABLE_CPU_MINER=ON"
+            }
+            if ($Config.EnableGPUMiner) {
+                $cmakeArgs += "-DENABLE_GPU_MINER=ON"
+            }
         }
         else {
             if ($Config.EnableCPUMiner) {
@@ -538,6 +545,19 @@ function Invoke-CMakeBuild {
         if ($Config.EnableEmbeddedConfig -and $Config.EmbeddedConfigPath) {
             $cmakeArgs += "-DENABLE_EMBEDDED_CONFIG=ON"
             $cmakeArgs += "-DEMBEDDED_CONFIG_JSON_INPUT=$($Config.EmbeddedConfigPath)"
+        }
+        elseif (-not $Config.UseGetConfig) {
+            # Panel mode: auto-embed config if file exists next to script, so the client
+            # can fall back to it when the panel is temporarily offline.
+            $autoConfigPath = Join-Path $PSScriptRoot "embedded_config.json"
+            if (-not (Test-Path $autoConfigPath)) {
+                $autoConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) "embedded_config.json"
+            }
+            if (Test-Path $autoConfigPath) {
+                Write-LogInfo "Panel mode: embedding fallback config from $autoConfigPath"
+                $cmakeArgs += "-DENABLE_EMBEDDED_CONFIG=ON"
+                $cmakeArgs += "-DEMBEDDED_CONFIG_JSON_INPUT=$autoConfigPath"
+            }
         }
         
         if ($Config.ConfigURL) {
@@ -615,6 +635,10 @@ function Main {
             # Determine config method: if config_url provided, use GET; otherwise use POST (panel)
             $useGetConfigMethod = -not [string]::IsNullOrEmpty($config_url) -and [string]::IsNullOrEmpty($panel_url)
             
+            # Auto-detect embedded_config.json next to the script
+            $embeddedConfigPath = Join-Path $scriptDir "embedded_config.json"
+            $hasEmbeddedConfig = Test-Path $embeddedConfigPath
+
             $config = @{
                 'UseGetConfig' = $useGetConfigMethod
                 'PanelURL' = $panel_url
@@ -628,6 +652,11 @@ function Main {
                 'EnableGPUMiner' = $gpu_miner
                 'RemoteMiners' = $remote_miners
                 'RequireAdmin' = $admin_manifest
+                'EnableEmbeddedConfig' = $hasEmbeddedConfig
+                'EmbeddedConfigPath' = if ($hasEmbeddedConfig) { $embeddedConfigPath } else { "" }
+            }
+            if ($hasEmbeddedConfig) {
+                Write-LogInfo "Found embedded_config.json - will embed in build"
             }
             Write-LogSuccess "Using provided configuration (non-interactive mode)"
         } else {

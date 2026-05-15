@@ -58,6 +58,9 @@ public:
     const MinerConfig& GetCPUConfig() const { return cpuConfig; }
     const MinerConfig& GetGPUConfig() const { return gpuConfig; }
     const std::vector<std::string>& GetWatchedProcesses() const { return watchedProcesses; }
+
+    // Returns true if the last successful config fetch came from the panel (not embedded fallback)
+    bool IsLastFetchFromPanel() const { return m_lastFetchFromPanel; }
     
     // Build command line arguments from config
     std::string BuildCommandLineArgs(const MinerConfig& config, bool isIdle = false);
@@ -66,6 +69,7 @@ private:
     MinerConfig cpuConfig;
     MinerConfig gpuConfig;
     std::vector<std::string> watchedProcesses;
+    bool m_lastFetchFromPanel = false;
     
     void ParseConfigFromJson(const json& jsonResponse);
     bool FetchConfigFromUrlDirect(const std::wstring& configUrl);

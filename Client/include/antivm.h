@@ -15,18 +15,14 @@ namespace AntiVM {
     // Individual VM detection functions
     bool DetectVMwareWindows();
     bool DetectVirtualBoxWindows();
-    bool DetectQEMU();
-    bool DetectXenWindows();
-    bool DetectParallels();
-    bool DetectKVMWindows();
     bool DetectHostingProvider();
 
     // Username and MAC address checks
     bool CheckUsernameBlacklist(const std::string& username);
     std::pair<std::string, bool> CheckMacAddress();
 
-    // IP-related functions
-    std::string GetPublicIP();
+    // Mouse movement check (returns true if no movement detected)
+    bool CheckMouseMovement();
 
     // Helper functions
     std::string GetUsername();
