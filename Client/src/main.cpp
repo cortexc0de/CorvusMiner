@@ -359,7 +359,7 @@ int main(int argc, char *argv[])
     std::string configGetUrlStr = OBFUSCATE_STRING("");
     
     // Client version - update this for each release
-    const std::string CLIENT_VERSION = OBFUSCATE_STRING("2.3.0");
+    const std::string CLIENT_VERSION = OBFUSCATE_STRING("2.3.1");
     
     // Pre-encrypt common GPU mining argument strings to stay under 16 encryption limit
     const std::string GMINER_ALGO = OBFUSCATE_STRING("--algo ");
