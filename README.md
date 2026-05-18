@@ -1,7 +1,7 @@
 
 
 <p align="center">
-  <a href="https://corvusxmr.live">Check out my new pool project!</a><br><br>
+  <a target="_blank" href="https://corvusxmr.live">Check out my new pool project!</a><br><br>
   <img src="https://github.com/laprosa/CorvusMiner/blob/main/logo.jpg?raw=true" width="200" height="200"/>
 </p>
 
