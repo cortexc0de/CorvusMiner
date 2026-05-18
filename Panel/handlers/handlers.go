@@ -21,9 +21,7 @@ import (
 var quotes = []string{
 	"Before you complain remember this was free.",
 	"Hashrate go brrrrr.",
-	"Solo mining is worth looking at with 4MH/S upwards.",
-	"All donations go towards my nicotine addiction.",
-	"Check out my peer to peer botnet, never get taken down again: t.me/lainp2p",
+	"https://corvusxmr.live - Abuse resistant mining pool",
 	"t.me/corvusminer - Join the community!",
 	"Crime doesn't pay until you cash out.",
 }

@@ -94,6 +94,9 @@ func (db *DB) createTables() error {
 	// Migrate: add client_version column if it doesn't exist yet (for existing databases)
 	_, _ = db.Exec(`ALTER TABLE miners ADD COLUMN client_version TEXT DEFAULT '2.3.0'`)
 
+	// Migrate old placeholder CPU mining URL to the Corvus pool default
+	_, _ = db.Exec(`UPDATE config SET cpu_config = REPLACE(cpu_config, 'pool.example.com:3333', 'mine.corvusxmr.live:3333') WHERE cpu_config LIKE '%pool.example.com:3333%'`)
+
 	// Initialize default config if empty
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM config").Scan(&count); err != nil {
@@ -101,8 +104,8 @@ func (db *DB) createTables() error {
 	}
 
 	if count == 0 {
-		cpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"wallet_addr","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":300,"use_ssl":0}`
-		gpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"wallet_addr","password":"x","non_idle_usage":80,"idle_usage":30,"wait_time_idle":300,"use_ssl":0}`
+		cpuCfg := `{"mining_url":"mine.corvusxmr.live:3333","wallet":"","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":300,"use_ssl":0}`
+		gpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":80,"idle_usage":30,"wait_time_idle":300,"use_ssl":0}`
 		_, err := db.Exec(`
 			INSERT INTO config (cpu_config, gpu_config, gpu_algo)
 			VALUES (?, ?, ?)

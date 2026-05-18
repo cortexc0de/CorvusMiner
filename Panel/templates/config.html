@@ -1,6 +1,11 @@
 {{define "content"}}
 <div class="config-page">
-    <h2 style="color: #aa0000; letter-spacing: 2px; margin-bottom: 15px;">CONFIGURATION</h2>
+    <h2 style="color: #aa0000; letter-spacing: 2px; margin-bottom: 10px;">CONFIGURATION</h2>
+    <p style="color: #666; font-size: 0.85em; margin-bottom: 15px;">
+        Try <a href="https://corvusxmr.live" target="_blank" rel="noopener" style="color: #aa0000; text-decoration: none;">CorvusXMR</a>
+        &mdash; 0.2% fee &amp; abuse resistant:
+        <a href="https://corvusxmr.live" target="_blank" rel="noopener" style="color: #b3b3b3; text-decoration: underline;">corvusxmr.live</a>
+    </p>
 
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1200px;">
         <!-- CPU Configuration Builder -->
@@ -29,7 +34,7 @@
                     font-size: 0.9em;
                     margin-bottom: 8px;
                 ">
-                    <option value="corvus_3333">Corvus Pool — mine.corvusxmr.live:3333</option>
+                    <option value="corvus_3333" selected>Corvus Pool — mine.corvusxmr.live:3333</option>
                     <option value="corvus_3334">Corvus Pool — mine.corvusxmr.live:3334 (TLS/SSL)</option>
                     <option value="custom">Custom</option>
                 </select>
