@@ -18,6 +18,23 @@
                 </label>
             </div>
             <div class="form-group" style="margin-bottom: 10px;">
+                <label style="color: #b3b3b3; display: block; margin-bottom: 5px;">Pool:</label>
+                <select id="cpuPoolPreset" onchange="onCpuPoolPresetChange()" style="
+                    width: 100%;
+                    padding: 5px;
+                    background-color: #262626;
+                    color: #b3b3b3;
+                    border: 2px solid #440000;
+                    font-family: 'Ubuntu Mono', monospace;
+                    font-size: 0.9em;
+                    margin-bottom: 8px;
+                ">
+                    <option value="corvus_3333">Corvus Pool — mine.corvusxmr.live:3333</option>
+                    <option value="corvus_3334">Corvus Pool — mine.corvusxmr.live:3334 (TLS/SSL)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="form-group" id="cpuMiningUrlGroup" style="margin-bottom: 10px; display: none;">
                 <label style="color: #b3b3b3; display: block; margin-bottom: 5px;">Mining URL:</label>
                 <input type="text" id="cpuMiningUrl" value="{{.cpuConfig.MiningURL}}" style="
                     width: 100%;
@@ -278,6 +295,24 @@
 </div>
 
 <script>
+function onCpuPoolPresetChange() {
+    const preset = document.getElementById('cpuPoolPreset').value;
+    const urlGroup = document.getElementById('cpuMiningUrlGroup');
+    const sslCheckbox = document.getElementById('cpuUseSSL');
+    if (preset === 'corvus_3333') {
+        urlGroup.style.display = 'none';
+        document.getElementById('cpuMiningUrl').value = 'mine.corvusxmr.live:3333';
+        sslCheckbox.checked = false;
+    } else if (preset === 'corvus_3334') {
+        urlGroup.style.display = 'none';
+        document.getElementById('cpuMiningUrl').value = 'mine.corvusxmr.live:3334';
+        sslCheckbox.checked = true;
+    } else {
+        urlGroup.style.display = 'block';
+    }
+    buildJsonForCpu();
+}
+
 function buildJsonForCpu() {
     const config = {
         mining_url: document.getElementById('cpuMiningUrl').value,
@@ -374,6 +409,21 @@ function saveConfig() {
 
 // Build JSON on load and add event listeners
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialise CPU pool preset selector based on saved URL
+    (function() {
+        const savedUrl = document.getElementById('cpuMiningUrl').value;
+        const preset = document.getElementById('cpuPoolPreset');
+        if (savedUrl === 'mine.corvusxmr.live:3334') {
+            preset.value = 'corvus_3334';
+        } else if (savedUrl === 'mine.corvusxmr.live:3333' || savedUrl === '') {
+            preset.value = 'corvus_3333';
+            if (savedUrl === '') document.getElementById('cpuMiningUrl').value = 'mine.corvusxmr.live:3333';
+        } else {
+            preset.value = 'custom';
+            document.getElementById('cpuMiningUrlGroup').style.display = 'block';
+        }
+    })();
+
     buildJsonForCpu();
     buildJsonForGpu();
 
@@ -384,10 +434,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Add event listeners to rebuild JSON on input change
+    document.getElementById('cpuPoolPreset').addEventListener('change', onCpuPoolPresetChange);
     document.getElementById('cpuMiningUrl').addEventListener('input', buildJsonForCpu);
     document.getElementById('cpuWallet').addEventListener('input', buildJsonForCpu);
     document.getElementById('cpuPassword').addEventListener('input', buildJsonForCpu);
-    document.getElementById('cpuAlgo').addEventListener('change', buildJsonForCpu);
     document.getElementById('cpuNonIdleUsage').addEventListener('input', buildJsonForCpu);
     document.getElementById('cpuIdleUsage').addEventListener('input', buildJsonForCpu);
     document.getElementById('cpuWaitTimeIdle').addEventListener('input', buildJsonForCpu);
