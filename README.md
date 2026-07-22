@@ -5,7 +5,7 @@
 </p>
 
 
-CorvusMiner
+CorvusMiner ~ [Check out my new pool project!](https://corvusxmr.live)
 ==========
 
 ### Information
