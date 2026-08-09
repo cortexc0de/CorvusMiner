@@ -21,6 +21,14 @@ If this project has served you well or been useful for resarching, please feel f
  - XMR: 878CwSB3HgCd5yMF2JmMEMFwTNJ2QV5EvUepvxFjTwqY7cJvPBLx6hXWR4drPjjnQzj3ZeqbCu1xzTUReu3eyJk4F9hTUzN
 
 
+## Images
+
+![dash](https://raw.githubusercontent.com/laprosa/CorvusMiner/refs/heads/main/Images/1.png?raw=true)
+![clients](https://raw.githubusercontent.com/laprosa/CorvusMiner/refs/heads/main/Images/2.png?raw=true)
+![config](https://raw.githubusercontent.com/laprosa/CorvusMiner/refs/heads/main/Images/3.png?raw=true)
+![update](https://raw.githubusercontent.com/laprosa/CorvusMiner/refs/heads/main/Images/4.png?raw=true)
+
+
 Features
 -----------------------
 
