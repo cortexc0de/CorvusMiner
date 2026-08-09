@@ -1,6 +1,6 @@
 # CorvusMiner Control Panel
 
-A modern web-based control panel for managing mining operations, built with Go and SQLite.
+A modern web-based control panel for managing mining operations, built with Go and PostgreSQL.
 
 ## Features
 
@@ -22,7 +22,7 @@ Panel/
 ├── models/
 │   └── models.go          # Data models (Miner, Config)
 ├── database/
-│   └── db.go              # SQLite database operations
+│   └── db.go              # PostgreSQL database operations
 ├── templates/
 │   ├── layout.html        # Base template
 │   ├── dashboard.html     # Dashboard page
@@ -33,12 +33,12 @@ Panel/
 │   │   └── style.css      # Stylesheet
 │   └── js/
 │       └── main.js        # Frontend JavaScript
-└── corvusminer.db           # SQLite database (auto-created)
 ```
 
 ## Prerequisites
 
 - Go 1.21 or later
+- PostgreSQL 14 or later
 - Git
 
 ## Installation
@@ -58,13 +58,36 @@ go mod download
 go build -o corvusminer-panel
 ```
 
+4. Start PostgreSQL. When the panel starts without `DATABASE_URL`, it prompts for:
+
+- User (defaults to `postgres`)
+- Password (hidden in an interactive terminal)
+- Host or IP address (defaults to `localhost`)
+- Port (defaults to `5432`)
+- Database name (defaults to `corvus`)
+- SSL mode (defaults to `disable`)
+
+If the selected database does not exist, the panel connects to PostgreSQL's `postgres` maintenance database and creates it. It then creates the tables and inserts the default configuration automatically. The selected user must have `CREATEDB` permission for this first launch.
+
+For unattended deployments, set the complete connection string instead:
+
+PowerShell:
+```powershell
+$env:DATABASE_URL = "postgres://postgres:password@localhost:5432/corvus?sslmode=disable"
+```
+
+Bash:
+```bash
+export DATABASE_URL="postgres://postgres:password@localhost:5432/corvus?sslmode=disable"
+```
+
 ## Running the Application
 
 ```bash
 ./corvusminer-panel
 ```
 
-The application will start on `http://localhost:8080`
+Enter the PostgreSQL connection settings when prompted. The application will then start on `http://localhost:8080`.
 
 ### For Development (with auto-reload)
 
@@ -117,28 +140,26 @@ Navigate to `/config` to:
 
 ### Miners Table
 ```sql
-CREATE TABLE miners (
-    id INTEGER PRIMARY KEY,
-    name TEXT UNIQUE,
-    ip TEXT,
-    port INTEGER,
-    status TEXT,
-    hashrate TEXT,
-    shares INTEGER,
-    created_at TIMESTAMP
+CREATE TABLE IF NOT EXISTS miners (
+    id BIGSERIAL PRIMARY KEY,
+    device_hash TEXT NOT NULL UNIQUE,
+    pc_username TEXT NOT NULL,
+    status TEXT DEFAULT 'online',
+    last_seen INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
 ### Config Table
 ```sql
-CREATE TABLE config (
-    id INTEGER PRIMARY KEY,
-    pool_url TEXT,
-    worker_name TEXT,
-    difficulty_target TEXT,
-    enable_ssl INTEGER,
-    update_interval INTEGER,
-    updated_at TIMESTAMP
+CREATE TABLE IF NOT EXISTS config (
+    id BIGSERIAL PRIMARY KEY,
+    cpu_config TEXT,
+    gpu_config TEXT,
+    gpu_algo TEXT DEFAULT '',
+    enable_cpu INTEGER DEFAULT 1,
+    enable_gpu INTEGER DEFAULT 1,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -169,7 +190,8 @@ Modify `static/css/style.css` or add new CSS files and link them in `templates/l
 ## Development Notes
 
 - The application uses Go's `html/template` package for templating
-- SQLite database is automatically created on first run as `corvusminer.db`
+- PostgreSQL tables are automatically created on first run
+- The PostgreSQL driver is pgx and does not require CGO
 - Static files are served with proper MIME types
 - All API responses use JSON format
 - CORS is not configured (for internal use)
@@ -177,10 +199,7 @@ Modify `static/css/style.css` or add new CSS files and link them in `templates/l
 ## Troubleshooting
 
 ### Database Issues
-If you encounter database lock errors, ensure the application isn't running multiple times:
-```bash
-pkill corvusminer-panel
-```
+Verify that PostgreSQL is reachable and that `DATABASE_URL` includes the correct user, password, host, port, and database. Use `sslmode=require` for hosted databases unless your provider specifies another TLS mode.
 
 ### Port Already in Use
 If port 8080 is in use, modify `main.go` to use a different port:

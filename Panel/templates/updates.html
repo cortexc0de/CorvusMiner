@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="updates-page">
-    <h2 style="color: #aa0000; letter-spacing: 2px; margin-bottom: 15px;">CLIENT UPDATES</h2>
+    <h2 class="page-title"><i data-lucide="package-open"></i>Client Updates</h2>
 
     <!-- Upload Section -->
     <div class="config-section" style="max-width: 600px; margin-bottom: 30px;">
@@ -49,7 +49,7 @@
             </div>
 
             <button type="submit" class="btn btn-primary" style="align-self: flex-start; padding: 10px 20px; font-size: 1em;">
-                Upload
+                <i data-lucide="upload"></i>Upload
             </button>
 
             <div id="uploadStatus" style="margin-top: 10px; display: none; padding: 10px; border-radius: 4px;"></div>
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
 
             if (response.ok) {
-                showStatus('Version ' + versionInput.value + ' uploaded successfully! ✓', 'success');
+                showStatus('Version ' + versionInput.value + ' uploaded successfully', 'success');
                 uploadForm.reset();
                 loadVersionHistory();
             } else {
@@ -167,15 +167,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td style="padding: 10px; color: #888; word-break: break-all;">${v.filename}</td>
                     <td style="padding: 10px; color: #888; font-size: 0.9em;">${new Date(v.uploaded_at).toLocaleDateString()}</td>
                     <td style="padding: 10px;">
-                        ${v.is_current ? '<span style="color: #5cb85c; font-weight: bold;">✓ Current</span>' : '<span style="color: #888;">Available</span>'}
+                        ${v.is_current ? '<span class="update-current"><i data-lucide="circle-check"></i>Current</span>' : '<span class="update-available">Available</span>'}
                     </td>
                     <td style="padding: 10px;">
-                        <a href="${v.download_url}" style="color: #ff6b00; text-decoration: none; margin-right: 10px;" download>Download</a>
-                        ${!v.is_current ? `<button class="btn btn-sm" style="padding: 4px 8px; font-size: 0.85em; background-color: #440000; color: #b3b3b3; border: 1px solid #666; cursor: pointer; border-radius: 3px; margin-right: 5px;" onclick="setCurrent(${v.id}, '${v.version}')">Set Current</button>` : ''}
-                        <button class="btn btn-sm" style="padding: 4px 8px; font-size: 0.85em; background-color: #661a1a; color: #ff9999; border: 1px solid #666; cursor: pointer; border-radius: 3px;" onclick="deleteVersion(${v.id}, '${v.version}')">Delete</button>
+                        <a href="${v.download_url}" class="btn btn-secondary btn-sm" download><i data-lucide="download"></i>Download</a>
+                        ${!v.is_current ? `<button class="btn btn-secondary btn-sm" onclick="setCurrent(${v.id}, '${v.version}')"><i data-lucide="badge-check"></i>Set current</button>` : ''}
+                        <button class="btn btn-danger btn-sm" onclick="deleteVersion(${v.id}, '${v.version}')" title="Delete version"><i data-lucide="trash-2"></i></button>
                     </td>
                 </tr>
             `).join('');
+            lucide.createIcons({ attrs: { 'stroke-width': 1.8 } });
         } catch (error) {
             console.error('Error loading version history:', error);
         }

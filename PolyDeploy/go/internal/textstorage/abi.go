@@ -1,0 +1,41 @@
+package textstorage
+
+// ABI is the JSON ABI of the TextStorage contract.
+// Keep in sync with contracts/TextStorage.sol.
+const ABI = `[
+  {
+    "inputs": [{"internalType":"string","name":"initialText","type":"string"}],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed":true,  "internalType":"address","name":"updatedBy","type":"address"},
+      {"indexed":false, "internalType":"string", "name":"newText",   "type":"string"}
+    ],
+    "name": "TextUpdated",
+    "type": "event"
+  },
+  {
+    "inputs":  [],
+    "name":    "getText",
+    "outputs": [{"internalType":"string","name":"","type":"string"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs":  [],
+    "name":    "owner",
+    "outputs": [{"internalType":"address","name":"","type":"address"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs":  [{"internalType":"string","name":"newText","type":"string"}],
+    "name":    "setText",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]`

@@ -21,7 +21,6 @@ import (
 var quotes = []string{
 	"Before you complain remember this was free.",
 	"Hashrate go brrrrr.",
-	"https://corvusxmr.live - Abuse resistant mining pool",
 	"t.me/corvusminer - Join the community!",
 	"Crime doesn't pay until you cash out.",
 }
@@ -116,17 +115,16 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	for _, miner := range miners {
 		if miner.Status == "online" {
 			onlineCount++
+			if miner.CPUHashRate > 0 {
+				cpuCount++
+				totalCPUHashrate += miner.CPUHashRate
+			}
+			if miner.GPUHashRate > 0 {
+				gpuCount++
+				totalGPUHashrate += miner.GPUHashRate
+			}
 		} else {
 			offlineCount++
-		}
-
-		if miner.CPUHashRate > 0 {
-			cpuCount++
-			totalCPUHashrate += miner.CPUHashRate
-		}
-		if miner.GPUHashRate > 0 {
-			gpuCount++
-			totalGPUHashrate += miner.GPUHashRate
 		}
 
 		// Count new miners by time period

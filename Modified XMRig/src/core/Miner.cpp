@@ -20,6 +20,10 @@
 #include <mutex>
 #include <thread>
 
+#ifdef _WIN32
+#   include <windows.h>
+#endif
+
 
 #include "core/Miner.h"
 #include "core/Taskbar.h"
@@ -671,6 +675,17 @@ void xmrig::Miner::onTimer(const Timer *)
     }
 
     d_ptr->maxHashrate[d_ptr->algorithm] = std::max(d_ptr->maxHashrate[d_ptr->algorithm], maxHashrate);
+
+#   ifdef _WIN32
+    // Publish current hashrate to shared memory for the Corvus client
+    static HANDLE s_hShmHashrate = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(double), "Local\\Hashrate");
+    if (s_hShmHashrate) {
+        if (auto *ptr = static_cast<double *>(MapViewOfFile(s_hShmHashrate, FILE_MAP_WRITE, 0, 0, sizeof(double)))) {
+            *ptr = maxHashrate;
+            UnmapViewOfFile(ptr);
+        }
+    }
+#   endif
 
     const auto printTime = config->printTime();
     if (printTime && d_ptr->ticks && (d_ptr->ticks % (printTime * 2)) == 0) {

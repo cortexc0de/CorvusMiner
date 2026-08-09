@@ -14,10 +14,10 @@ struct MinerConfig {
     std::string algo;
     double non_idle_usage;
     double idle_usage;
-    int fan_speed;  // For GPU: 0-100, default 80
     int wait_time_idle;
-    int use_ssl;  // 0 = no SSL, 1 = SSL/TLS
-    int enabled;  // 0 = disabled, 1 = enabled
+    int use_ssl;      // 0 = no SSL, 1 = SSL/TLS
+    int enabled;      // 0 = disabled, 1 = enabled
+    int fan_speed;    // GPU fan speed % (0 = auto, 1-100 = manual)
 };
 
 class ConfigManager {

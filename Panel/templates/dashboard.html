@@ -1,37 +1,45 @@
 {{define "content"}}
 <div class="dashboard">
-    <h2 style="color: #aa0000; letter-spacing: 2px; margin-bottom: 20px;">DASHBOARD</h2>
+    <h2 class="page-title"><i data-lucide="layout-dashboard"></i>Dashboard</h2>
     
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 10px; width: 100%; height: 250px; margin-bottom: 30px;">
+    <div class="dashboard-stats">
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon stat-icon-online" data-lucide="circle-check"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">ONLINE</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #00aa55;">{{.onlineDevices}}</p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon stat-icon-offline" data-lucide="circle-x"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">OFFLINE</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #aa3333;">{{.offlineDevices}}</p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="cpu"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">CPU</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #b3b3b3;">{{.cpuMining}}</p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="monitor-cog"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">GPU</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #b3b3b3;">{{.gpuMining}}</p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="gauge"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">CPU H/s</h3>
             <p style="font-size: 1.2em; margin: 8px 0 0 0; overflow: hidden; text-overflow: ellipsis; font-weight: bold; color: #b3b3b3;"><span class="hashrate-total" data-value="{{.totalCPUHashrate}}">{{printf "%.0f" .totalCPUHashrate}}</span></p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="activity"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">GPU H/s</h3>
             <p style="font-size: 1.2em; margin: 8px 0 0 0; overflow: hidden; text-overflow: ellipsis; font-weight: bold; color: #b3b3b3;"><span class="hashrate-total" data-value="{{.totalGPUHashrate}}">{{printf "%.0f" .totalGPUHashrate}}</span></p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="clock-3"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">NEW 24H</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #b3b3b3;">{{.new24h}}</p>
         </div>
         <div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; overflow: hidden; font-family: 'Ubuntu Mono', monospace;">
+            <i class="stat-icon" data-lucide="calendar-days"></i>
             <h3 style="font-size: 0.75em; margin: 0; line-height: 1.2; overflow: visible; text-overflow: ellipsis; color: #aa0000; letter-spacing: 1px; font-family: 'Ubuntu Mono', monospace;">NEW 7D</h3>
             <p style="font-size: 2em; margin: 8px 0 0 0; overflow: hidden; font-weight: bold; color: #b3b3b3;">{{.new7d}}</p>
         </div>

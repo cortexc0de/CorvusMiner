@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="miners-page">
-    <h2>Miner Management</h2>
+    <h2 class="page-title"><i data-lucide="hard-drive"></i>Miner Management</h2>
     
     <div class="miners-controls">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 20px;">
@@ -20,7 +20,10 @@
                 </select>
             </div>
         </div>
-        <input type="text" id="minerSearch" class="search-input" placeholder="Search by username, device hash, CPU, GPU...">
+        <div class="search-field">
+            <i data-lucide="search"></i>
+            <input type="text" id="minerSearch" class="search-input" placeholder="Search by username, device hash, CPU, GPU...">
+        </div>
     </div>
 
     <!-- Bulk Delete Stale Miners Section -->
@@ -30,7 +33,7 @@
             <label for="staleMinersInput" style="margin: 0; color: #e0e0e0;">Delete miners that haven't checked in for:</label>
             <input type="number" id="staleMinersInput" placeholder="Days" min="1" value="7" style="width: 80px; padding: 0.75rem; border-radius: 4px; border: 1px solid #440000; background-color: #1a1a1a; color: #e0e0e0;">
             <span style="margin: 0; color: #e0e0e0;">days</span>
-            <button id="deleteStaleBtn" class="btn btn-danger" style="margin-left: 10px;">Delete Stale Miners</button>
+            <button id="deleteStaleBtn" class="btn btn-danger" style="margin-left: 10px;"><i data-lucide="trash-2"></i>Delete Stale Miners</button>
             <span id="deleteStaleStatus" style="margin-left: 10px; font-size: 0.9em; color: #888;"></span>
         </div>
     </div>
@@ -102,7 +105,7 @@
                     <td style="padding: 3px 2px;">{{.ClientVersion}}</td>
                     <td style="padding: 3px 2px;"><span class="status {{.Status}}" style="font-size: 0.9em; padding: 2px 4px;">{{.Status}}</span></td>
                     <td style="padding: 3px 2px;">
-                        <button class="btn btn-danger btn-sm delete-miner" data-id="{{.ID}}" style="font-size: 0.85em; padding: 2px 6px;">Delete</button>
+                        <button class="btn btn-danger btn-sm delete-miner" data-id="{{.ID}}" title="Delete miner" aria-label="Delete miner"><i data-lucide="trash-2"></i></button>
                     </td>
                 </tr>
                 {{end}}
@@ -110,9 +113,9 @@
         </table>
         
         <div class="pagination-controls" style="margin-top: 15px;">
-            <button id="prevPage" class="btn btn-secondary">Previous</button>
+            <button id="prevPage" class="btn btn-secondary"><i data-lucide="arrow-left"></i>Previous</button>
             <span id="pageInfo" class="page-info">Page 1 of <span id="totalPages">1</span></span>
-            <button id="nextPage" class="btn btn-secondary">Next</button>
+            <button id="nextPage" class="btn btn-secondary">Next<i data-lucide="arrow-right"></i></button>
             <small id="rowCountInfo" style="margin-left: 20px; color: #666;">Displaying <span id="displayCount">0</span> rows on this page</small>
         </div>
         {{else}}
@@ -309,7 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = await response.json();
             
             if (response.ok) {
-                deleteStaleStatus.textContent = data.message + ' ✓';
+                deleteStaleStatus.textContent = data.message;
                 deleteStaleStatus.style.color = '#5cb85c';
                 setTimeout(() => {
                     location.reload();

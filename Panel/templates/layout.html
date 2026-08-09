@@ -7,28 +7,38 @@
     <title>CorvusMiner - Control Panel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <div class="container">
         <nav class="navbar">
-            <div class="navbar-brand">
-                <img src="/static/img/logo.jpg" alt="CorvusMiner Logo" class="navbar-logo">
-                <h1>CorvusMiner</h1>
+            <div class="navbar-header">
+                <a href="/" class="navbar-brand" aria-label="CorvusMiner dashboard">
+                    <img src="/static/img/logo.jpg" alt="" class="navbar-logo">
+                    <span>
+                        <strong>Corvus</strong>
+                        <small>Control panel</small>
+                    </span>
+                </a>
+                <button class="nav-toggle icon-btn" type="button" aria-label="Toggle navigation" aria-expanded="false" title="Toggle navigation">
+                    <i data-lucide="menu"></i>
+                </button>
             </div>
             <ul class="navbar-menu">
-                <li><a href="/" class="nav-link">Dashboard</a></li>
-                <li><a href="/miners" class="nav-link">Miners</a></li>
-                <li><a href="/config" class="nav-link">Configuration</a></li>
-                <li><a href="/updates" class="nav-link">Updates</a></li>
-                <li><a href="/donations" class="nav-link">Donations</a></li>
+                <li><a href="/" class="nav-link"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a></li>
+                <li><a href="/miners" class="nav-link"><i data-lucide="hard-drive"></i><span>Miners</span></a></li>
+                <li><a href="/config" class="nav-link"><i data-lucide="sliders-horizontal"></i><span>Configuration</span></a></li>
+                <li><a href="/updates" class="nav-link"><i data-lucide="package-open"></i><span>Updates</span></a></li>
+                <li><a href="/donations" class="nav-link"><i data-lucide="heart-handshake"></i><span>Donations</span></a></li>
             </ul>
             <div class="sidebar-spacer"></div>
-            <button class="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+            <button class="logout-btn" type="button" onclick="window.location.href='/logout'">
+                <i data-lucide="log-out"></i><span>Logout</span>
+            </button>
         </nav>
 
-        <div style="display: flex; flex-direction: column; flex: 1;">
+        <div class="app-shell">
             <main class="main-content">
                 {{template "content" .}}
             </main>
@@ -40,6 +50,25 @@
     </div>
 
     <script src="/static/js/main.js"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script>
+        const navToggle = document.querySelector('.nav-toggle');
+        const navbar = document.querySelector('.navbar');
+        navToggle?.addEventListener('click', () => {
+            const isOpen = navbar.classList.toggle('nav-open');
+            navToggle.setAttribute('aria-expanded', String(isOpen));
+        });
+
+        const currentPath = window.location.pathname;
+        document.querySelectorAll('.nav-link').forEach((link) => {
+            const href = link.getAttribute('href');
+            const isActive = href === '/' ? currentPath === '/' : currentPath.startsWith(href);
+            link.classList.toggle('active', isActive);
+            if (isActive) link.setAttribute('aria-current', 'page');
+        });
+
+        lucide.createIcons({ attrs: { 'stroke-width': 1.8 } });
+    </script>
 </body>
 </html>
 {{end}}

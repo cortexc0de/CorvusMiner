@@ -1,14 +1,97 @@
 package main
 
 import (
+	"bufio"
 	"corvusminer/panel/database"
 	"corvusminer/panel/handlers"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
+
+func prompt(reader *bufio.Reader, label, defaultValue string) (string, error) {
+	if defaultValue == "" {
+		fmt.Printf("%s: ", label)
+	} else {
+		fmt.Printf("%s [%s]: ", label, defaultValue)
+	}
+
+	value, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return value, nil
+}
+
+func promptPassword(reader *bufio.Reader) (string, error) {
+	fmt.Print("Password: ")
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		password, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		return string(password), err
+	}
+
+	password, err := reader.ReadString('\n')
+	return strings.TrimSpace(password), err
+}
+
+func promptDatabaseURL() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("PostgreSQL connection settings")
+
+	username, err := prompt(reader, "User", "postgres")
+	if err != nil {
+		return "", err
+	}
+	password, err := promptPassword(reader)
+	if err != nil {
+		return "", err
+	}
+	host, err := prompt(reader, "Host/IP", "localhost")
+	if err != nil {
+		return "", err
+	}
+	port, err := prompt(reader, "Port", "5432")
+	if err != nil {
+		return "", err
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return "", fmt.Errorf("invalid PostgreSQL port %q", port)
+	}
+	databaseName, err := prompt(reader, "Database", "corvus")
+	if err != nil {
+		return "", err
+	}
+	sslMode, err := prompt(reader, "SSL mode", "disable")
+	if err != nil {
+		return "", err
+	}
+
+	connectionURL := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(username, password),
+		Host:   net.JoinHostPort(host, strconv.Itoa(portNumber)),
+		Path:   "/" + databaseName,
+	}
+	query := connectionURL.Query()
+	query.Set("sslmode", sslMode)
+	connectionURL.RawQuery = query.Encode()
+	return connectionURL.String(), nil
+}
 
 func main() {
 	// Get the directory of the executable
@@ -19,9 +102,15 @@ func main() {
 	baseDir := filepath.Dir(exePath)
 	log.Printf("Running from: %s", baseDir)
 
-	// Initialize database with absolute path
-	dbPath := filepath.Join(baseDir, "corvusminer.db")
-	db, err := database.InitDB(dbPath)
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL, err = promptDatabaseURL()
+		if err != nil {
+			log.Fatalf("Failed to read database settings: %v", err)
+		}
+	}
+
+	db, err := database.InitDB(databaseURL)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
