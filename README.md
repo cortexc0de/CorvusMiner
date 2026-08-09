@@ -5,7 +5,7 @@
 </p>
 
 
-CorvusMiner ~ [Check out my new pool project!](https://corvusxmr.live)
+CorvusMiner ~ a CPU+GPU miner working on windows 11
 ==========
 
 ### Information
@@ -18,7 +18,7 @@ CorvusMiner is an open source, silent crypto miner. The readme will detail featu
 
 If this project has served you well or been useful for resarching, please feel free to donate:
 
- - XMR: 85DxSo8AHVnXBnK74b3YerAF9TUayPUxRXSU9NNTdtyDJqKAaKReQ4UMqqjKeWrNwvDS16bLSW5yhRvDmyPRhMMZPc91T5Q
+ - XMR: 878CwSB3HgCd5yMF2JmMEMFwTNJ2QV5EvUepvxFjTwqY7cJvPBLx6hXWR4drPjjnQzj3ZeqbCu1xzTUReu3eyJk4F9hTUzN
 
 
 Features
