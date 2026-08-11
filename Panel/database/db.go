@@ -159,7 +159,7 @@ func (db *DB) createTables() error {
 	}
 
 	if count == 0 {
-		cpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":3,"use_ssl":0}`
+		cpuCfg := `{"mining_url":"pool.xmr.pw:4343","wallet":"","password":"x","non_idle_usage":50,"idle_usage":20,"wait_time_idle":3,"use_ssl":1}`
 		gpuCfg := `{"mining_url":"pool.example.com:3333","wallet":"","password":"x","non_idle_usage":80,"idle_usage":30,"wait_time_idle":3,"use_ssl":0}`
 		_, err := db.Exec(`
 			INSERT INTO config (cpu_config, gpu_config, gpu_algo)

